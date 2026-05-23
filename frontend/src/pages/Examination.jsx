@@ -48,8 +48,8 @@ export default function Examination() {
       .then((data) => {
         store.initSubtopics(data.subtopics);
         setSubtopicsLoaded(true);
-        // Fetch the session transcript for the opening turn (non-critical)
-        fetch(`/api/sessions/${sessionId}`)
+        // Fetch the session transcript for the opening turn
+        return fetch(`/api/sessions/${sessionId}`)
           .then((r) => r.json())
           .then((session) => {
             if (session.transcript && session.transcript.length > 0) {
