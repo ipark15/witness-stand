@@ -21,8 +21,12 @@ const useSessionStore = create((set, get) => ({
   // Files
   uploadedFiles: [],
 
+  // Case file (lesson plan)
+  caseFile: null, // { topic, matters: [{ id, label, category, prompt_hint, status, children: [...] }] }
+  evaluationFeedback: '',
+
   // UI
-  view: 'examination', // 'examination' | 'studyguide'
+  view: 'examination', // 'examination' | 'casefile'
 
   // Verdict
   verdict: null,
@@ -41,6 +45,8 @@ const useSessionStore = create((set, get) => ({
       subtopicScores: [],
       messages: [],
       uploadedFiles: [],
+      caseFile: null,
+      evaluationFeedback: '',
       view: 'examination',
       verdict: null,
     }),
@@ -79,6 +85,35 @@ const useSessionStore = create((set, get) => ({
   removeFile: (name) =>
     set((state) => ({ uploadedFiles: state.uploadedFiles.filter((f) => f.name !== name) })),
 
+  setCaseFile: (caseFile) => set({ caseFile }),
+
+  setEvaluationFeedback: (feedback) => set({ evaluationFeedback: feedback }),
+
+  applySectionUpdates: (updates) =>
+    set((state) => {
+      if (!state.caseFile || !updates || updates.length === 0) return state;
+      const rank = { pending: 0, partial: 1, covered: 2 };
+      const newMatters = state.caseFile.matters.map((matter) => ({
+        ...matter,
+        children: matter.children.map((node) => {
+          const update = updates.find((u) => u.node_id === node.id);
+          if (!update) return node;
+          if ((rank[update.new_status] || 0) > (rank[node.status] || 0)) {
+            return { ...node, status: update.new_status };
+          }
+          return node;
+        }),
+      }));
+      // Update matter-level status based on children
+      const updatedMatters = newMatters.map((matter) => {
+        const allCovered = matter.children.every((c) => c.status === 'covered');
+        const anyPartial = matter.children.some((c) => c.status === 'partial' || c.status === 'covered');
+        const newStatus = allCovered ? 'covered' : anyPartial ? 'partial' : matter.status;
+        return { ...matter, status: newStatus };
+      });
+      return { caseFile: { ...state.caseFile, matters: updatedMatters } };
+    }),
+
   setView: (view) => set({ view }),
 
   setVerdict: (verdict) => set({ verdict }),
@@ -95,6 +130,8 @@ const useSessionStore = create((set, get) => ({
       subtopicScores: [],
       messages: [],
       uploadedFiles: [],
+      caseFile: null,
+      evaluationFeedback: '',
       view: 'examination',
       verdict: null,
     }),

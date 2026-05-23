@@ -7,12 +7,12 @@ import MessageBubble from '../components/examination/MessageBubble.jsx';
 import SubtopicProgress from '../components/examination/SubtopicProgress.jsx';
 import Sidebar from '../components/examination/Sidebar.jsx';
 import TestimonyInput from '../components/examination/TestimonyInput.jsx';
-import StudyGuideView from '../components/examination/StudyGuideView.jsx';
+import CaseFileView from '../components/examination/CaseFileView.jsx';
 
 export default function Examination() {
   const navigate = useNavigate();
   const store = useSessionStore();
-  const { sessionId, subject, topic, intensity, subtopics, currentSubtopicIndex, juryFavor, subtopicScores, messages, view } = store;
+  const { sessionId, subject, topic, intensity, subtopics, currentSubtopicIndex, juryFavor, subtopicScores, messages, view, caseFile, evaluationFeedback } = store;
 
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -48,6 +48,13 @@ export default function Examination() {
       .then((data) => {
         store.initSubtopics(data.subtopics);
         setSubtopicsLoaded(true);
+        // Fetch the case file (lesson plan) if available
+        fetch(`/api/sessions/${sessionId}/lesson-plan`)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((plan) => {
+            if (plan) store.setCaseFile(plan);
+          })
+          .catch(() => {});
         // Fetch the session transcript for the opening turn
         return fetch(`/api/sessions/${sessionId}`)
           .then((r) => r.json())
@@ -132,6 +139,14 @@ export default function Examination() {
       });
       store.applyScoring(data.quality_delta, data.jury_delta);
 
+      // Apply case file section updates + evaluation feedback
+      if (data.section_updates && data.section_updates.length > 0) {
+        store.applySectionUpdates(data.section_updates);
+      }
+      if (data.evaluation_feedback) {
+        store.setEvaluationFeedback(data.evaluation_feedback);
+      }
+
       // Show judge transition if present (subtopic advance OR session complete verdict)
       if (data.judge_transition) {
         store.addMessage({
@@ -215,7 +230,7 @@ export default function Examination() {
         </div>
 
         <div className="flex border border-gold/25 rounded-lg overflow-hidden">
-          {['examination', 'studyguide'].map((v) => (
+          {['examination', 'casefile'].map((v) => (
             <button
               key={v}
               onClick={() => store.setView(v)}
@@ -225,7 +240,7 @@ export default function Examination() {
                   : 'text-parchment/50 hover:text-parchment/80'
               }`}
             >
-              {v === 'examination' ? 'Examination' : 'Study Guide'}
+              {v === 'examination' ? 'Examination' : 'Case File'}
             </button>
           ))}
         </div>
@@ -285,9 +300,9 @@ export default function Examination() {
               />
             </>
           ) : (
-            <StudyGuideView
-              topic={topic}
-              subtopicScores={subtopicScores}
+            <CaseFileView
+              caseFile={caseFile}
+              evaluationFeedback={evaluationFeedback}
               currentSubtopicIndex={currentSubtopicIndex}
             />
           )}
