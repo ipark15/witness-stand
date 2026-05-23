@@ -180,10 +180,11 @@ export default function Examination() {
       store.applyScoring(0, data.jury_delta);
       store.addMessage({ role: 'ai', content: data.hint.content, speakerRole: 'cocounsel' });
     } catch (err) {
-      store.applyScoring(0, -5);
+      // No local penalty on error — backend never processed the request,
+      // so the user shouldn't pay for a hint they never received.
       store.addMessage({
         role: 'ai',
-        content: 'Co-Counsel leans in: Your argument needs more specificity. Focus on the core definition and a concrete example.',
+        content: 'Co-Counsel is unavailable at this time. Please try again.',
         speakerRole: 'cocounsel',
       });
     } finally {
