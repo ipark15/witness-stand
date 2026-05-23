@@ -144,6 +144,12 @@ export default function Examination() {
                   });
                 }
               });
+            } else {
+              store.addMessage({
+                role: 'ai',
+                content: 'Court is now in session. Counsel, please state your understanding of the subject matter at hand.',
+                speakerRole: 'judge',
+              });
             }
           })
           .catch((err) => {
