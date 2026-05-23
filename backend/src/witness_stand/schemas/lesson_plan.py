@@ -5,9 +5,6 @@ to explain for a given topic. Each leaf node represents a discrete piece of
 understanding (a "claim" the defense should be able to make). The internal
 answer key is never sent to the frontend — only the structure and completion
 state are visible to the student.
-
-Design status: STUB — structure will evolve after workshopping the toy
-example (e.g., OS virtual memory) interactively.
 """
 from __future__ import annotations
 
@@ -190,7 +187,7 @@ class LessonPlanResponse(BaseModel):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class SectionUpdate(BaseModel):
-    """One section status change signalled by the opposition during a turn."""
+    """One section status change signalled by the evaluator during a turn."""
 
     node_id: str = Field(description="Which case file node this applies to.")
     new_status: Literal["partial", "covered"] = Field(
@@ -199,4 +196,29 @@ class SectionUpdate(BaseModel):
     reason: str = Field(
         default="",
         description="Brief rationale (internal) for why this status was assigned.",
+    )
+
+
+class EvaluationResult(BaseModel):
+    """Structured output from the case file evaluator.
+
+    Returned alongside each opposition turn. Tells the frontend which
+    nodes the student just satisfied and gives constructive feedback
+    about remaining gaps.
+    """
+
+    updates: list[SectionUpdate] = Field(
+        default_factory=list,
+        description="Nodes whose status changed this turn.",
+    )
+    feedback: str = Field(
+        default="",
+        description=(
+            "Constructive guidance for the student about remaining gaps. "
+            "Visible to the student — must not reveal answer key content."
+        ),
+    )
+    all_covered: bool = Field(
+        default=False,
+        description="True if every node in the current matter is now covered.",
     )

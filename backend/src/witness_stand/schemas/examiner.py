@@ -116,3 +116,10 @@ class OppositionResponse(BaseModel):
         default_factory=list,
         description="Case file nodes whose status changed this turn.",
     )
+    evaluation_feedback: str = Field(
+        default="",
+        description=(
+            "Constructive feedback about remaining gaps in the current matter. "
+            "Visible to the student — does not reveal answer key content."
+        ),
+    )

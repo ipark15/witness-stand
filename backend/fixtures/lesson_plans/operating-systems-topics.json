@@ -1,0 +1,25 @@
+{
+  "subject": "Operating Systems",
+  "topics": [
+    {
+      "label": "Process Scheduling & Context Switching",
+      "description": "The mechanisms the OS uses to manage process execution transitions and resource allocation among competing processes."
+    },
+    {
+      "label": "Concurrency, Synchronization & Deadlocks",
+      "description": "The application of primitives like semaphores and mutexes to manage shared resources and the logic required to prevent or resolve deadlock conditions."
+    },
+    {
+      "label": "Virtual Memory & Paging Mechanisms",
+      "description": "The hardware and software processes involved in address translation and the mapping of virtual memory spaces to physical memory frames."
+    },
+    {
+      "label": "Page Replacement & Demand Paging",
+      "description": "The logic used to manage memory pressure through page fault handling and the implementation of replacement algorithms like LRU or FIFO."
+    },
+    {
+      "label": "File System Architecture & I/O Management",
+      "description": "How the operating system organizes persistent data on storage media and manages hardware-level I/O requests and disk scheduling."
+    }
+  ]
+}

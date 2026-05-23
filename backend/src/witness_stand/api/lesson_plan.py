@@ -1,15 +1,12 @@
-"""Lesson plan (case file) endpoint.
+"""Lesson plan (case file) endpoints.
 
-Generates the structured examination agenda before the first turn. This
-replaces / augments the subtopic planner with a richer hierarchical
-breakdown that makes gaps visible to the student without revealing answers.
-
-Design status: STUB — the LLM call and response processing will evolve
-after workshopping the toy example. The wiring is in place.
+Generates or loads the structured examination agenda before the first
+turn. Supports both LLM generation and pre-baked fixture loading (for
+demos and user studies where token budget matters).
 """
 from __future__ import annotations
 
-import uuid
+import os
 
 from fastapi import APIRouter, HTTPException, status
 
@@ -31,10 +28,13 @@ from witness_stand.schemas.lesson_plan import (
     LessonPlan,
     LessonPlanGeneration,
     LessonPlanResponse,
-    NodeCategory,
 )
+from witness_stand.schemas.session import SubtopicProgress
+from witness_stand.services.fixtures import load_fixture
 
 router = APIRouter(prefix="/sessions/{session_id}/lesson-plan", tags=["lesson-plan"])
+
+USE_FIXTURES = os.getenv("USE_FIXTURE_LESSON_PLAN", "").lower() in ("true", "1", "yes")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -99,7 +99,7 @@ def _plan_to_response(plan: LessonPlan) -> LessonPlanResponse:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Endpoint
+# Endpoints
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -109,58 +109,89 @@ async def generate_lesson_plan(
     store: SessionStoreDep,
     llm: LLMDep,
 ) -> LessonPlanResponse:
-    """Generate the structured case file / lesson plan for this session.
+    """Generate or load the structured case file for this session.
 
-    Should be called after session creation (and optionally after file
-    upload). The result is persisted on the session and drives both the
-    examination agenda and the case file tab in the frontend.
+    If USE_FIXTURE_LESSON_PLAN is set, loads from fixtures instead of
+    calling the LLM. The result is persisted on the session.
     """
-    usable_files = fresh_files(session)
-    prompt = build_lesson_plan_prompt(
-        subject=session.subject,
-        topic=session.topic,
-        has_materials=bool(usable_files),
-    )
-    system_instruction = build_lesson_plan_system(
-        subject=session.subject,
-        topic=session.topic,
-        has_materials=bool(usable_files),
-    )
+    if session.lesson_plan is not None:
+        logger.info("lesson_plan_already_exists", session_id=session.id)
+        return _plan_to_response(session.lesson_plan)
 
-    logger.info(
-        "lesson_plan_invoke",
-        with_files=bool(usable_files),
-        subject=session.subject,
-        topic=session.topic,
-    )
+    gen: LessonPlanGeneration | None = None
 
-    try:
-        if usable_files:
-            gen = await llm.structured_with_files(
-                prompt,
-                files=usable_files,
-                schema=LessonPlanGeneration,
-                system=system_instruction,
+    # Try fixture first if enabled
+    if USE_FIXTURES:
+        gen = load_fixture(session.subject, session.topic)
+        if gen:
+            logger.info(
+                "lesson_plan_from_fixture",
+                subject=session.subject,
+                topic=session.topic,
             )
-        else:
-            gen = await llm.structured(
-                prompt,
-                schema=LessonPlanGeneration,
-                system=system_instruction,
-            )
-    except LLMError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Lesson plan generation failed: {exc}",
-        ) from exc
+
+    # Fall back to LLM generation
+    if gen is None:
+        usable_files = fresh_files(session)
+        prompt = build_lesson_plan_prompt(
+            subject=session.subject,
+            topic=session.topic,
+            has_materials=bool(usable_files),
+        )
+        system_instruction = build_lesson_plan_system(
+            subject=session.subject,
+            topic=session.topic,
+            has_materials=bool(usable_files),
+        )
+
+        logger.info(
+            "lesson_plan_invoke",
+            with_files=bool(usable_files),
+            subject=session.subject,
+            topic=session.topic,
+        )
+
+        try:
+            if usable_files:
+                gen = await llm.structured_with_files(
+                    prompt,
+                    files=usable_files,
+                    schema=LessonPlanGeneration,
+                    system=system_instruction,
+                )
+            else:
+                gen = await llm.structured(
+                    prompt,
+                    schema=LessonPlanGeneration,
+                    system=system_instruction,
+                )
+        except LLMError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Lesson plan generation failed: {exc}",
+            ) from exc
 
     plan = _generation_to_plan(gen)
 
-    # TODO: Persist the lesson plan on the session once the Session schema
-    # is extended. For now we just return it. The session schema change is
-    # part of the workshop discussion (how lesson plan relates to subtopics).
-    #
-    # session.lesson_plan = plan
-    # await store.update(session)
+    # Persist the lesson plan on the session and populate subtopics from matters
+    session.lesson_plan = plan
+    session.subtopics = [
+        SubtopicProgress(name=matter.label)
+        for matter in plan.children
+    ]
+    session.current_matter_index = 0
+    session.current_subtopic_index = 0
+    await store.update(session)
 
     return _plan_to_response(plan)
+
+
+@router.get("", response_model=LessonPlanResponse, status_code=status.HTTP_200_OK)
+async def get_lesson_plan(session: SessionDep) -> LessonPlanResponse:
+    """Return the current case file state (with completion statuses)."""
+    if session.lesson_plan is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No lesson plan has been generated for this session yet.",
+        )
+    return _plan_to_response(session.lesson_plan)

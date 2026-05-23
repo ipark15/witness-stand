@@ -6,11 +6,12 @@ Opposing Counsel. If the opposition signals ``advance``, the backend emits
 a templated judge transition on its own authority (no LLM call) — judge
 flavor is the app speaking, not the model.
 
-We use the multi-turn chat API so the model sees the dialogue as a
-dialogue. Stable session context (subject/topic/intensity) lives in the
-system instruction; per-turn mutable state (current subtopic, jury favor)
-is prepended to the latest user message only — see
-``ai/prompts/opposition.py``.
+The evaluation step checks the student's testimony against the case file
+(lesson plan) answer keys and produces:
+  * section_updates: which nodes got checked off
+  * evaluation_feedback: constructive guidance about remaining gaps
+  * matter advancement: if all nodes in the current matter are covered,
+    the examination advances to the next matter automatically.
 """
 from __future__ import annotations
 
@@ -25,6 +26,7 @@ from witness_stand.ai.prompts import (
     build_opposition_history,
     build_opposition_system,
 )
+from witness_stand.ai.prompts.evaluation import build_evaluation_system
 from witness_stand.api._deps import (
     LLMDep,
     SessionDep,
@@ -39,9 +41,51 @@ from witness_stand.schemas.examiner import (
     TranscriptMessage,
     TurnRequest,
 )
+from witness_stand.schemas.lesson_plan import (
+    CaseFileNode,
+    EvaluationResult,
+    SectionUpdate,
+)
 from witness_stand.services.deltas import rubric_to_deltas
 
 router = APIRouter(prefix="/sessions/{session_id}/turns", tags=["turns"])
+
+
+def _apply_section_updates(
+    plan_children: list[CaseFileNode],
+    updates: list[SectionUpdate],
+) -> None:
+    """Apply status changes from the evaluator to the persisted case file nodes."""
+    node_map: dict[str, CaseFileNode] = {}
+    for matter in plan_children:
+        for node in matter.children:
+            node_map[node.id] = node
+
+    for update in updates:
+        node = node_map.get(update.node_id)
+        if node is None:
+            continue
+        # Only move forward: pending→partial→covered, never backwards
+        rank = {"pending": 0, "partial": 1, "covered": 2}
+        if rank.get(update.new_status, 0) > rank.get(node.status, 0):
+            node.status = update.new_status
+
+
+def _matter_all_covered(matter: CaseFileNode) -> bool:
+    """Check if every leaf node in this matter is covered."""
+    if not matter.children:
+        return matter.status == "covered"
+    return all(child.status == "covered" for child in matter.children)
+
+
+def _update_matter_status(matter: CaseFileNode) -> None:
+    """Update the branch node status based on its children."""
+    if not matter.children:
+        return
+    if all(c.status == "covered" for c in matter.children):
+        matter.status = "covered"
+    elif any(c.status in ("partial", "covered") for c in matter.children):
+        matter.status = "partial"
 
 
 @router.post("", response_model=OppositionResponse, status_code=status.HTTP_200_OK)
@@ -63,13 +107,11 @@ async def submit_turn(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
                 "Session has no subtopic plan yet. POST /sessions/{id}/subtopics "
-                "before submitting turns."
+                "or /sessions/{id}/lesson-plan before submitting turns."
             ),
         )
 
-    # 1. Build the chat history the opposition sees BEFORE we mutate the
-    #    transcript — the new defense message arrives via the builder, not
-    #    via the persisted transcript yet.
+    # 1. Build the chat history the opposition sees.
     history = build_opposition_history(
         transcript=session.transcript,
         new_defense_message=body.message,
@@ -92,8 +134,7 @@ async def submit_turn(
     )
     session.transcript.append(defense_msg)
 
-    # 3. Invoke the opposition via the chat API. File-grounded variant if
-    #    we still have valid course materials.
+    # 3. Invoke the opposition.
     usable_files = fresh_files(session)
     logger.info(
         "opposition_invoke",
@@ -115,15 +156,13 @@ async def submit_turn(
                 system=system_instruction,
             )
     except LLMError as exc:
-        # Roll back the defense message we just appended so the transcript
-        # stays consistent if the model failed.
         session.transcript.pop()
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Opposition unavailable: {exc}",
         ) from exc
 
-    # 4. Persist the opposition's reply (decorated with its own scoring + rationale).
+    # 4. Persist the opposition's reply.
     counsel_msg = TranscriptMessage(
         id=uuid.uuid4().hex,
         speaker="counsel",
@@ -134,7 +173,7 @@ async def submit_turn(
     )
     session.transcript.append(counsel_msg)
 
-    # 5. Apply scoring deltas derived from the model-judged rubric.
+    # 5. Apply scoring deltas.
     quality_delta, jury_delta = rubric_to_deltas(turn.scoring)
     session.jury_favor = max(0, min(100, session.jury_favor + jury_delta))
     current_progress = session.subtopics[session.current_subtopic_index]
@@ -142,16 +181,82 @@ async def submit_turn(
         0, min(100, current_progress.quality + quality_delta)
     )
 
-    # 6. If the opposition advances, the COURT emits a templated transition
-    #    and we move the cursor. No LLM call here — this is the app speaking
-    #    in its own voice on its own authority.
+    # 6. Case file evaluation — check the student's testimony against
+    #    remaining answer keys in the current matter.
+    section_updates: list[SectionUpdate] = []
+    evaluation_feedback = ""
+    matter_covered = False
+
+    if session.lesson_plan and session.lesson_plan.children:
+        matter_idx = min(
+            session.current_matter_index,
+            len(session.lesson_plan.children) - 1,
+        )
+        current_matter = session.lesson_plan.children[matter_idx]
+
+        # Only evaluate if there are uncovered nodes
+        has_remaining = any(
+            c.status != "covered" for c in current_matter.children
+        )
+        if has_remaining:
+            eval_system = build_evaluation_system(
+                subject=session.subject,
+                topic=session.topic,
+                current_matter=current_matter,
+            )
+            try:
+                eval_result = await llm.structured(
+                    (
+                        f"Student's latest testimony:\n{body.message}\n\n"
+                        "Evaluate which case file nodes (if any) the student's "
+                        "testimony satisfies. Be generous with credit."
+                    ),
+                    schema=EvaluationResult,
+                    system=eval_system,
+                )
+                section_updates = eval_result.updates
+                evaluation_feedback = eval_result.feedback
+                matter_covered = eval_result.all_covered
+
+                # Apply updates to the persisted plan
+                _apply_section_updates(
+                    session.lesson_plan.children,
+                    section_updates,
+                )
+                _update_matter_status(current_matter)
+
+                # Double-check all_covered against actual node states
+                matter_covered = _matter_all_covered(current_matter)
+
+                logger.info(
+                    "evaluation_complete",
+                    updates=len(section_updates),
+                    matter_covered=matter_covered,
+                )
+            except LLMError:
+                logger.warning("evaluation_failed", exc_info=True)
+                # Non-fatal: examination continues without evaluation
+
+    # 7. Advance logic — matter is covered OR opposition signals advance.
     judge_msg: TranscriptMessage | None = None
     advanced = False
     session_complete = False
 
-    if turn.advance:
-        if session.current_subtopic_index < len(session.subtopics) - 1:
-            session.current_subtopic_index += 1
+    should_advance = matter_covered or turn.advance
+    if should_advance:
+        can_advance_matter = (
+            session.lesson_plan
+            and session.current_matter_index < len(session.lesson_plan.children) - 1
+        )
+        can_advance_subtopic = (
+            session.current_subtopic_index < len(session.subtopics) - 1
+        )
+
+        if can_advance_matter or can_advance_subtopic:
+            if can_advance_matter:
+                session.current_matter_index += 1
+            if can_advance_subtopic:
+                session.current_subtopic_index += 1
             advanced = True
             judge_msg = TranscriptMessage(
                 id=uuid.uuid4().hex,
@@ -161,7 +266,7 @@ async def submit_turn(
             )
             session.transcript.append(judge_msg)
         else:
-            # Last subtopic just concluded — render the verdict.
+            # Last matter/subtopic concluded — verdict.
             session.complete = True
             session.verdict = _verdict_for(session.jury_favor)
             session_complete = True
@@ -194,6 +299,8 @@ async def submit_turn(
         jury_delta=jury_delta,
         advanced_subtopic=advanced,
         session_complete=session_complete,
+        section_updates=section_updates,
+        evaluation_feedback=evaluation_feedback,
     )
 
 

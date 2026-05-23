@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 from witness_stand.ai.base import FileRef
 from witness_stand.schemas.examiner import TranscriptMessage
 from witness_stand.schemas.files import FileRefDTO
+from witness_stand.schemas.lesson_plan import LessonPlan
 
 
 def _new_session_id() -> str:
@@ -70,6 +71,12 @@ class Session(BaseModel):
     transcript: list[TranscriptMessage] = Field(default_factory=list)
     files: list[FileRef] = Field(default_factory=list)
 
+    lesson_plan: LessonPlan | None = Field(
+        default=None,
+        description="The structured case file for this session (populated after generation or loaded from fixture).",
+    )
+    current_matter_index: int = 0
+
     complete: bool = False
     verdict: str | None = None  # "Acquitted" | "Hung Jury" | "Guilty" once complete
 
@@ -81,6 +88,13 @@ class Session(BaseModel):
             return self.topic
         idx = min(self.current_subtopic_index, len(self.subtopics) - 1)
         return self.subtopics[idx].name
+
+    @property
+    def current_matter(self) -> str:
+        if not self.lesson_plan or not self.lesson_plan.children:
+            return self.topic
+        idx = min(self.current_matter_index, len(self.lesson_plan.children) - 1)
+        return self.lesson_plan.children[idx].label
 
 
 class SessionState(BaseModel):
