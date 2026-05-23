@@ -26,7 +26,10 @@ from witness_stand.ai.prompts import (
     build_opposition_history,
     build_opposition_system,
 )
-from witness_stand.ai.prompts.evaluation import build_evaluation_system
+from witness_stand.ai.prompts.evaluation import (
+    build_evaluation_history,
+    build_evaluation_system,
+)
 from witness_stand.api._deps import (
     LLMDep,
     SessionDep,
@@ -204,13 +207,13 @@ async def submit_turn(
                 topic=session.topic,
                 current_matter=current_matter,
             )
+            eval_history = build_evaluation_history(
+                transcript=session.transcript,
+                new_defense_message=body.message,
+            )
             try:
-                eval_result = await llm.structured(
-                    (
-                        f"Student's latest testimony:\n{body.message}\n\n"
-                        "Evaluate which case file nodes (if any) the student's "
-                        "testimony satisfies. Be generous with credit."
-                    ),
+                eval_result = await llm.structured_chat(
+                    eval_history,
                     schema=EvaluationResult,
                     system=eval_system,
                 )
