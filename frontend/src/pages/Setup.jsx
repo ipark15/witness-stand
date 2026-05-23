@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useSessionStore from '../store/sessionStore.js';
 
@@ -49,22 +49,72 @@ export default function Setup() {
   const [topic, setTopic] = useState('');
   const [intensity, setIntensity] = useState('Trial');
   const [dragOver, setDragOver] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
   const fileInputRef = useRef(null);
+  const [fileObjects, setFileObjects] = useState([]);
 
-  const handleSubmit = () => {
-    if (!subject.trim() || !topic.trim()) return;
-    setSession(subject.trim(), topic.trim(), intensity);
-    navigate('/examination');
-  };
+  const handleSubmit = useCallback(async () => {
+    if (!subject.trim() || !topic.trim() || submitting) return;
+    setSubmitting(true);
+    setError(null);
+
+    try {
+      // 1. Create backend session
+      const sessionRes = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subject: subject.trim(),
+          topic: topic.trim(),
+          intensity,
+        }),
+      });
+      if (!sessionRes.ok) {
+        const detail = await sessionRes.json().catch(() => ({}));
+        throw new Error(detail.detail || `Failed to create session (${sessionRes.status})`);
+      }
+      const session = await sessionRes.json();
+      const sessionId = session.id;
+
+      // 2. Upload files if any
+      if (fileObjects.length > 0) {
+        for (const f of fileObjects) {
+          const formData = new FormData();
+          formData.append('file', f);
+          const uploadRes = await fetch(`/api/sessions/${sessionId}/files`, {
+            method: 'POST',
+            body: formData,
+          });
+          if (!uploadRes.ok) {
+            console.warn(`File upload failed for ${f.name}, continuing without it`);
+          }
+        }
+      }
+
+      // 3. Set local state and navigate
+      setSession(sessionId, subject.trim(), topic.trim(), intensity);
+      navigate('/examination');
+    } catch (err) {
+      console.error(err);
+      setError(err.message || 'Failed to create session');
+    } finally {
+      setSubmitting(false);
+    }
+  }, [subject, topic, intensity, submitting, fileObjects, setSession, navigate]);
 
   const handleFileDrop = (e) => {
     e.preventDefault();
     setDragOver(false);
-    Array.from(e.dataTransfer.files).forEach((f) => addFile({ name: f.name, size: f.size }));
+    const files = Array.from(e.dataTransfer.files);
+    files.forEach((f) => addFile({ name: f.name, size: f.size }));
+    setFileObjects((prev) => [...prev, ...files]);
   };
 
   const handleFileInput = (e) => {
-    Array.from(e.target.files).forEach((f) => addFile({ name: f.name, size: f.size }));
+    const files = Array.from(e.target.files);
+    files.forEach((f) => addFile({ name: f.name, size: f.size }));
+    setFileObjects((prev) => [...prev, ...files]);
     e.target.value = '';
   };
 
@@ -180,12 +230,18 @@ export default function Setup() {
                 </div>
               </div>
 
+              {error && (
+                <div className="bg-crimson/10 border border-crimson/30 rounded-lg px-4 py-2.5 font-sans text-sm text-crimson">
+                  {error}
+                </div>
+              )}
+
               <button
                 onClick={handleSubmit}
-                disabled={!subject.trim() || !topic.trim()}
+                disabled={!subject.trim() || !topic.trim() || submitting}
                 className="w-full py-3.5 bg-navy text-gold font-sans text-sm tracking-widest uppercase rounded-lg border border-gold/30 hover:bg-navy/90 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow"
               >
-                ⚖ Call to Order
+                {submitting ? 'Convening Court…' : '⚖ Call to Order'}
               </button>
             </div>
           ) : (

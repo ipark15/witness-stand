@@ -91,7 +91,7 @@ function MessageBubble({ msg }) {
 export default function Examination() {
   const navigate = useNavigate();
   const store = useSessionStore();
-  const { subject, topic, intensity, subtopics, currentSubtopicIndex, juryFavor, subtopicScores, messages, view } = store;
+  const { sessionId, subject, topic, intensity, subtopics, currentSubtopicIndex, juryFavor, subtopicScores, messages, view } = store;
 
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -102,14 +102,15 @@ export default function Examination() {
   const initRef = useRef(false);
 
   useEffect(() => {
-    if (!subject || !topic) {
+    if (!sessionId || !subject || !topic) {
       navigate('/');
     }
-  }, [subject, topic, navigate]);
+  }, [sessionId, subject, topic, navigate]);
 
-  // Load subtopics on mount
+  // Load subtopics on mount — calls POST /api/sessions/{id}/subtopics
+  // which also generates the opening examiner turn
   useEffect(() => {
-    if (initRef.current || !subject || !topic) return;
+    if (initRef.current || !sessionId || !subject || !topic) return;
     initRef.current = true;
 
     if (subtopics.length > 0) {
@@ -117,17 +118,41 @@ export default function Examination() {
       return;
     }
 
-    fetch('/api/subtopics', {
+    setLoading(true);
+    fetch(`/api/sessions/${sessionId}/subtopics`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ subject, topic }),
     })
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
       .then((data) => {
         store.initSubtopics(data.subtopics);
         setSubtopicsLoaded(true);
+        // The backend seeds an opening examiner turn in the transcript.
+        // Fetch session to get it.
+        return fetch(`/api/sessions/${sessionId}`);
       })
-      .catch(() => {
+      .then((r) => r.json())
+      .then((session) => {
+        // Load any existing transcript messages (opening turn from backend)
+        if (session.transcript && session.transcript.length > 0) {
+          session.transcript.forEach((msg) => {
+            const speakerMap = { counsel: 'counsel', judge: 'judge', co_counsel: 'cocounsel', defense: null };
+            if (msg.speaker === 'defense') {
+              store.addMessage({ role: 'user', content: msg.content });
+            } else {
+              store.addMessage({
+                role: 'ai',
+                content: msg.content,
+                speakerRole: speakerMap[msg.speaker] || 'counsel',
+              });
+            }
+          });
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to load subtopics:', err);
         store.initSubtopics([
           'Core Definitions & Concepts',
           'Fundamental Principles',
@@ -135,50 +160,21 @@ export default function Examination() {
           'Advanced Edge Cases',
         ]);
         setSubtopicsLoaded(true);
-      });
-  }, [subject, topic]);
-
-  // Send opening question once subtopics are loaded and no messages yet
-  const openingFired = useRef(false);
-  useEffect(() => {
-    if (!subtopicsLoaded || subtopics.length === 0 || messages.length > 0 || openingFired.current) return;
-    openingFired.current = true;
-
-    setLoading(true);
-    fetch('/api/examine', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        subject,
-        topic,
-        intensity,
-        messageHistory: [],
-        currentSubtopic: subtopics[0],
-        juryFavor: 50,
-        userMessage: 'The defense is ready. Please begin the examination.',
-      }),
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        store.addMessage({ role: 'ai', content: data.message, speakerRole: data.role });
-      })
-      .catch(() => {
         store.addMessage({
           role: 'ai',
-          content:
-            'Court is now in session. Counsel, please state your understanding of the subject matter at hand.',
+          content: 'Court is now in session. Counsel, please state your understanding of the subject matter at hand.',
           speakerRole: 'judge',
         });
       })
       .finally(() => setLoading(false));
-  }, [subtopicsLoaded, subtopics]);
+  }, [sessionId, subject, topic]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
   const handleSubmit = useCallback(async () => {
-    if (!input.trim() || loading) return;
+    if (!input.trim() || loading || !sessionId) return;
 
     const userMsg = input.trim();
     setInput('');
@@ -189,39 +185,40 @@ export default function Examination() {
     setExchangeCount(newExchangeCount);
 
     try {
-      const res = await fetch('/api/examine', {
+      const res = await fetch(`/api/sessions/${sessionId}/turns`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          subject,
-          topic,
-          intensity,
-          messageHistory: store.messages,
-          currentSubtopic: subtopics[currentSubtopicIndex] || topic,
-          juryFavor,
-          userMessage: userMsg,
-        }),
+        body: JSON.stringify({ message: userMsg }),
       });
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
 
-      store.addMessage({ role: 'ai', content: data.message, speakerRole: data.role });
-      store.applyScoring(data.qualityDelta, data.juryDelta);
+      // data: { counsel_message, judge_transition, quality_delta, jury_delta, advanced_subtopic, session_complete }
+      store.addMessage({
+        role: 'ai',
+        content: data.counsel_message.content,
+        speakerRole: 'counsel',
+      });
+      store.applyScoring(data.quality_delta, data.jury_delta);
 
-      // Advance subtopic if AI signals mastery OR exchange limit reached
-      const shouldAdvance = data.advanceSubtopic || newExchangeCount % EXCHANGES_PER_SUBTOPIC === 0;
-      if (shouldAdvance) {
-        const nextIdx = currentSubtopicIndex + 1;
-        if (nextIdx >= subtopics.length) {
-          const finalJuryFavor = useSessionStore.getState().juryFavor;
-          const verdict =
-            finalJuryFavor >= 70 ? 'Acquitted' : finalJuryFavor >= 40 ? 'Hung Jury' : 'Guilty';
-          store.setVerdict(verdict);
-          navigate('/verdict');
-        } else {
-          store.nextSubtopic();
-        }
+      // If the court advanced to next subtopic
+      if (data.advanced_subtopic && data.judge_transition) {
+        store.addMessage({
+          role: 'ai',
+          content: data.judge_transition.content,
+          speakerRole: 'judge',
+        });
+        store.nextSubtopic();
+      }
+
+      // If session is complete, navigate to verdict
+      if (data.session_complete) {
+        const finalJuryFavor = useSessionStore.getState().juryFavor;
+        const verdict =
+          finalJuryFavor >= 70 ? 'Acquitted' : finalJuryFavor >= 40 ? 'Hung Jury' : 'Guilty';
+        store.setVerdict(verdict);
+        navigate('/verdict');
       }
     } catch (err) {
       console.error(err);
@@ -233,27 +230,23 @@ export default function Examination() {
     } finally {
       setLoading(false);
     }
-  }, [input, loading, exchangeCount, subject, topic, intensity, subtopics, currentSubtopicIndex, juryFavor]);
+  }, [input, loading, sessionId, exchangeCount]);
 
   const handleCoCounsel = useCallback(async () => {
-    if (loading || coCounselLoading) return;
+    if (loading || coCounselLoading || !sessionId) return;
     setCoCounselLoading(true);
-    store.applyScoring(0, -5);
     try {
-      const res = await fetch('/api/co-counsel', {
+      const res = await fetch(`/api/sessions/${sessionId}/co-counsel`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          subject,
-          topic,
-          currentSubtopic: subtopics[currentSubtopicIndex] || topic,
-          messageHistory: store.messages,
-        }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      store.addMessage({ role: 'ai', content: data.hint, speakerRole: 'cocounsel' });
+      // Backend applies -5 jury penalty server-side
+      store.applyScoring(0, data.jury_delta);
+      store.addMessage({ role: 'ai', content: data.hint.content, speakerRole: 'cocounsel' });
     } catch (err) {
+      // Fallback: apply penalty locally on error
+      store.applyScoring(0, -5);
       store.addMessage({
         role: 'ai',
         content: 'Co-Counsel leans in: Your argument needs more specificity. Focus on the core definition and a concrete example.',
@@ -262,7 +255,7 @@ export default function Examination() {
     } finally {
       setCoCounselLoading(false);
     }
-  }, [loading, coCounselLoading, subject, topic, subtopics, currentSubtopicIndex]);
+  }, [loading, coCounselLoading, sessionId]);
 
   const currentSubtopic = subtopics[currentSubtopicIndex] || topic;
   const wordCount = input.trim() ? input.trim().split(/\s+/).filter(Boolean).length : 0;
