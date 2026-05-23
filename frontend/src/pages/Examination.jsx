@@ -119,9 +119,7 @@ export default function Examination() {
     }
 
     setLoading(true);
-    fetch(`/api/sessions/${sessionId}/subtopics`, {
-      method: 'POST',
-    })
+    fetch(`/api/sessions/${sessionId}/subtopics`, { method: 'POST' })
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
@@ -129,27 +127,33 @@ export default function Examination() {
       .then((data) => {
         store.initSubtopics(data.subtopics);
         setSubtopicsLoaded(true);
-        // The backend seeds an opening examiner turn in the transcript.
-        // Fetch session to get it.
-        return fetch(`/api/sessions/${sessionId}`);
-      })
-      .then((r) => r.json())
-      .then((session) => {
-        // Load any existing transcript messages (opening turn from backend)
-        if (session.transcript && session.transcript.length > 0) {
-          session.transcript.forEach((msg) => {
-            const speakerMap = { counsel: 'counsel', judge: 'judge', co_counsel: 'cocounsel', defense: null };
-            if (msg.speaker === 'defense') {
-              store.addMessage({ role: 'user', content: msg.content });
-            } else {
-              store.addMessage({
-                role: 'ai',
-                content: msg.content,
-                speakerRole: speakerMap[msg.speaker] || 'counsel',
+        // Fetch the session transcript for the opening turn (non-critical)
+        fetch(`/api/sessions/${sessionId}`)
+          .then((r) => r.json())
+          .then((session) => {
+            if (session.transcript && session.transcript.length > 0) {
+              session.transcript.forEach((msg) => {
+                const speakerMap = { counsel: 'counsel', judge: 'judge', co_counsel: 'cocounsel', defense: null };
+                if (msg.speaker === 'defense') {
+                  store.addMessage({ role: 'user', content: msg.content });
+                } else {
+                  store.addMessage({
+                    role: 'ai',
+                    content: msg.content,
+                    speakerRole: speakerMap[msg.speaker] || 'counsel',
+                  });
+                }
               });
             }
+          })
+          .catch((err) => {
+            console.warn('Failed to load opening transcript:', err);
+            store.addMessage({
+              role: 'ai',
+              content: 'Court is now in session. Counsel, please state your understanding of the subject matter at hand.',
+              speakerRole: 'judge',
+            });
           });
-        }
       })
       .catch((err) => {
         console.error('Failed to load subtopics:', err);

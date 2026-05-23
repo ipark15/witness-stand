@@ -349,11 +349,23 @@ class GemmaLLM(LLM):
                 max_tokens if max_tokens is not None else DEFAULT_MAX_OUTPUT_TOKENS
             ),
         }
-        if system:
-            kwargs["system_instruction"] = system
+        # NOTE: We intentionally avoid using response_schema with the API's
+        # constrained decoding — it hangs indefinitely with Gemma 26B on the
+        # free tier. Instead we request JSON via the system prompt and parse
+        # the text response ourselves (see _parse_structured).
+        json_schema_instruction = ""
         if response_schema is not None:
             kwargs["response_mime_type"] = "application/json"
-            kwargs["response_schema"] = response_schema
+            schema_json = json.dumps(
+                response_schema.model_json_schema(), indent=2
+            )
+            json_schema_instruction = (
+                f"\n\nYou MUST respond with valid JSON conforming to this schema:\n"
+                f"```json\n{schema_json}\n```\n"
+                "Output ONLY the JSON object. No markdown fences, no extra text."
+            )
+        if system or json_schema_instruction:
+            kwargs["system_instruction"] = (system or "") + json_schema_instruction
         return types.GenerateContentConfig(**kwargs)
 
 
@@ -460,8 +472,17 @@ def _parse_structured(
             "Structured response was empty.",
             provider=_PROVIDER_NAME,
         )
+    # Strip markdown fences if present
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        lines = cleaned.split("\n")
+        # Remove first line (```json or ```) and last line (```)
+        lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        cleaned = "\n".join(lines).strip()
     try:
-        data = json.loads(raw)
+        data = json.loads(cleaned)
     except json.JSONDecodeError as exc:
         raise LLMError(
             f"Structured response was not valid JSON: {exc}",
