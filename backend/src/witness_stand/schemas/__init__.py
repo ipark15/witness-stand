@@ -10,6 +10,15 @@ from witness_stand.schemas.examiner import (
     TurnRequest,
 )
 from witness_stand.schemas.files import FileRefDTO, FileUploadResult
+from witness_stand.schemas.lesson_plan import (
+    CaseFileNode,
+    CaseFileNodeDTO,
+    LessonPlan,
+    LessonPlanGeneration,
+    LessonPlanResponse,
+    NodeCategory,
+    SectionUpdate,
+)
 from witness_stand.schemas.scoring import ScoringRubric
 from witness_stand.schemas.session import (
     Session,
@@ -20,11 +29,18 @@ from witness_stand.schemas.session import (
 from witness_stand.schemas.subtopics import SubtopicPlan, SubtopicsResponse
 
 __all__ = [
+    "CaseFileNode",
+    "CaseFileNodeDTO",
     "ExaminerTurn",
     "FileRefDTO",
     "FileUploadResult",
+    "LessonPlan",
+    "LessonPlanGeneration",
+    "LessonPlanResponse",
+    "NodeCategory",
     "OppositionResponse",
     "ScoringRubric",
+    "SectionUpdate",
     "Session",
     "SessionCreate",
     "SessionState",

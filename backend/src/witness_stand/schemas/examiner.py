@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from witness_stand.schemas.lesson_plan import SectionUpdate
 from witness_stand.schemas.scoring import ScoringRubric
 
 # Who in the courtroom is speaking on a given message. This is determined by
@@ -40,6 +41,15 @@ class ExaminerTurn(BaseModel):
         description=(
             "One private sentence: why you chose this question/challenge. The "
             "student does not see this."
+        ),
+    )
+    section_updates: list[SectionUpdate] = Field(
+        default_factory=list,
+        description=(
+            "Case file sections addressed by the student's testimony this turn. "
+            "Empty if no sections were meaningfully advanced. The opposition "
+            "reviews the case file answer key and signals when the student's "
+            "explanation covers a node."
         ),
     )
 
@@ -101,4 +111,8 @@ class OppositionResponse(BaseModel):
     )
     session_complete: bool = Field(
         description="True if the last subtopic just concluded.",
+    )
+    section_updates: list[SectionUpdate] = Field(
+        default_factory=list,
+        description="Case file nodes whose status changed this turn.",
     )
