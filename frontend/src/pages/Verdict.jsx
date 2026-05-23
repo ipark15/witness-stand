@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useSessionStore from '../store/sessionStore.js';
 
@@ -32,6 +32,40 @@ const VERDICT_CONFIG = {
     qualityLabel: (q) => (q >= 70 ? 'Adequate' : q >= 40 ? 'Marginal' : 'Insufficient'),
   },
 };
+
+function RetryButton({ subject, topic, intensity, navigate }) {
+  const [retrying, setRetrying] = useState(false);
+  const { setSession } = useSessionStore();
+
+  const handleRetry = useCallback(async () => {
+    if (retrying) return;
+    setRetrying(true);
+    try {
+      const res = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subject, topic, intensity }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const session = await res.json();
+      setSession(session.id, subject, topic, intensity);
+      navigate('/examination');
+    } catch (err) {
+      console.error('Retry failed:', err);
+      setRetrying(false);
+    }
+  }, [retrying, subject, topic, intensity, setSession, navigate]);
+
+  return (
+    <button
+      onClick={handleRetry}
+      disabled={retrying}
+      className="flex-1 py-3.5 bg-navy text-gold rounded-xl font-sans text-sm tracking-wide hover:bg-navy/90 disabled:opacity-50 transition-colors shadow"
+    >
+      {retrying ? 'Reconvening…' : 'Retry Examination'}
+    </button>
+  );
+}
 
 export default function Verdict() {
   const navigate = useNavigate();
@@ -177,15 +211,7 @@ export default function Verdict() {
           >
             New Case
           </button>
-          <button
-            onClick={() => {
-              useSessionStore.getState().setSession(subject, topic, intensity);
-              navigate('/examination');
-            }}
-            className="flex-1 py-3.5 bg-navy text-gold rounded-xl font-sans text-sm tracking-wide hover:bg-navy/90 transition-colors shadow"
-          >
-            Retry Examination
-          </button>
+          <RetryButton subject={subject} topic={topic} intensity={intensity} navigate={navigate} />
         </div>
       </div>
     </div>

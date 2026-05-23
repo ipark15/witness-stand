@@ -341,7 +341,7 @@ export default function Setup() {
                     </div>
                   </div>
                   <button
-                    onClick={() => removeFile(f.name)}
+                    onClick={() => { removeFile(f.name); setFileObjects((prev) => prev.filter((fo) => fo.name !== f.name)); }}
                     className="font-sans text-xs text-crimson hover:text-crimson/70 transition-colors shrink-0 ml-2"
                   >
                     Remove
