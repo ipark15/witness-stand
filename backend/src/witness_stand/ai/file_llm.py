@@ -6,14 +6,17 @@ or a human) to read the request, compose a response, and write it back — all
 without burning API tokens.
 
 Protocol:
-  1. Provider writes ``data/llm_request.json`` with the full context.
-  2. Provider polls for ``data/llm_response.json`` (checks every 1s).
+  1. Provider writes ``data/llm_request_{id}.json`` with the full context.
+  2. Provider polls for ``data/llm_response_{id}.json`` (checks every 1s).
   3. When response file appears, provider reads it, validates, and returns.
   4. Both files are cleaned up after each exchange.
 
-Request format (llm_request.json):
+Each exchange uses unique ID-scoped file paths so concurrent requests
+don't interfere with each other.
+
+Request format (llm_request_{id}.json):
   {
-    "id": "<uuid>",
+    "id": "<short uuid>",
     "method": "text" | "structured" | "chat" | "structured_chat" | ...,
     "system": "<system prompt or null>",
     "prompt": "<user prompt for single-turn>",
@@ -23,7 +26,7 @@ Request format (llm_request.json):
     "files": [{"display_name": "...", "mime_type": "..."}]
   }
 
-Response format (llm_response.json):
+Response format (llm_response_{id}.json):
   {
     "id": "<must match request id>",
     "content": "<text response OR JSON string for structured>"
@@ -60,29 +63,30 @@ class FileLLM:
         self._data_dir = data_dir
         self._data_dir.mkdir(parents=True, exist_ok=True)
 
-    @property
-    def _request_path(self) -> Path:
-        return self._data_dir / "llm_request.json"
+    def _request_path(self, request_id: str) -> Path:
+        return self._data_dir / f"llm_request_{request_id}.json"
 
-    @property
-    def _response_path(self) -> Path:
-        return self._data_dir / "llm_response.json"
+    def _response_path(self, request_id: str) -> Path:
+        return self._data_dir / f"llm_response_{request_id}.json"
 
     async def _exchange(self, request: dict) -> str:
         """Write request, poll for response, return content string."""
         request_id = str(uuid.uuid4())[:8]
         request["id"] = request_id
 
-        # Clean up any stale files
-        self._response_path.unlink(missing_ok=True)
+        req_path = self._request_path(request_id)
+        resp_path = self._response_path(request_id)
+
+        # Clean up any stale response for this ID
+        resp_path.unlink(missing_ok=True)
 
         # Write request
-        self._request_path.write_text(json.dumps(request, indent=2), encoding="utf-8")
+        req_path.write_text(json.dumps(request, indent=2), encoding="utf-8")
         logger.info(
             "file_llm_request_written",
             request_id=request_id,
             method=request.get("method"),
-            path=str(self._request_path),
+            path=str(req_path),
         )
 
         # Poll for response
@@ -91,9 +95,9 @@ class FileLLM:
             await asyncio.sleep(_POLL_INTERVAL_S)
             elapsed += _POLL_INTERVAL_S
 
-            if self._response_path.exists():
+            if resp_path.exists():
                 try:
-                    raw = self._response_path.read_text(encoding="utf-8")
+                    raw = resp_path.read_text(encoding="utf-8")
                     response = json.loads(raw)
                 except (json.JSONDecodeError, OSError) as e:
                     logger.warning("file_llm_response_parse_error", error=str(e))
@@ -109,8 +113,8 @@ class FileLLM:
                     continue
 
                 # Cleanup
-                self._request_path.unlink(missing_ok=True)
-                self._response_path.unlink(missing_ok=True)
+                req_path.unlink(missing_ok=True)
+                resp_path.unlink(missing_ok=True)
 
                 content = response.get("content", "")
                 logger.info(
@@ -121,7 +125,7 @@ class FileLLM:
                 return content
 
         # Timeout
-        self._request_path.unlink(missing_ok=True)
+        req_path.unlink(missing_ok=True)
         raise LLMError(
             f"FileLLM timed out after {_TIMEOUT_S}s waiting for response.",
             provider=_PROVIDER_NAME,

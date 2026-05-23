@@ -74,7 +74,7 @@ export default function Setup() {
       if (fileObjects.length > 0) {
         for (const f of fileObjects) {
           const formData = new FormData();
-          formData.append('file', f);
+          formData.append('files', f);
           const uploadRes = await fetch(`/api/sessions/${sessionId}/files`, {
             method: 'POST',
             body: formData,
