@@ -202,14 +202,16 @@ export default function Examination() {
       });
       store.applyScoring(data.quality_delta, data.jury_delta);
 
-      // If the court advanced to next subtopic
-      if (data.advanced_subtopic && data.judge_transition) {
+      // Show judge transition if present (subtopic advance OR session complete verdict)
+      if (data.judge_transition) {
         store.addMessage({
           role: 'ai',
           content: data.judge_transition.content,
           speakerRole: 'judge',
         });
-        store.nextSubtopic();
+        if (data.advanced_subtopic) {
+          store.nextSubtopic();
+        }
       }
 
       // If session is complete, navigate to verdict
