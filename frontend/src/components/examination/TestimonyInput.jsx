@@ -1,4 +1,6 @@
+import { useCallback } from 'react';
 import { WORD_COUNT, EXCHANGES_PER_SUBTOPIC } from '../../lib/constants.js';
+import useSpeechRecognition from '../../hooks/useSpeechRecognition.js';
 
 export default function TestimonyInput({
   input,
@@ -11,6 +13,18 @@ export default function TestimonyInput({
   onCoCounsel,
 }) {
   const wordCount = input.trim() ? input.trim().split(/\s+/).filter(Boolean).length : 0;
+
+  const onTranscript = useCallback(
+    (text) => {
+      setInput((prev) => {
+        const needsSpace = prev.length > 0 && !prev.endsWith(' ');
+        return prev + (needsSpace ? ' ' : '') + text.trim();
+      });
+    },
+    [setInput],
+  );
+
+  const { listening, supported, toggle } = useSpeechRecognition({ onTranscript });
 
   return (
     <>
@@ -58,20 +72,49 @@ export default function TestimonyInput({
                 {wordCount > WORD_COUNT.THOROUGH && ' — thorough'}
               </span>
             </div>
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  onSubmit();
-                }
-              }}
-              placeholder="State your response to the court… (Shift+Enter for new line)"
-              rows={3}
-              disabled={loading}
-              className="w-full border border-ink/20 bg-white/60 rounded-lg px-3.5 py-2.5 font-serif text-ink text-[15px] placeholder:text-ink/25 focus:outline-none focus:border-gold focus:ring-1 focus:ring-gold/30 resize-none transition disabled:opacity-60"
-            />
+            <div className="relative">
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    onSubmit();
+                  }
+                }}
+                placeholder={listening ? 'Listening — speak your testimony…' : 'State your response to the court… (Shift+Enter for new line)'}
+                rows={3}
+                disabled={loading}
+                className={`w-full border bg-white/60 rounded-lg px-3.5 py-2.5 pr-12 font-serif text-ink text-[15px] placeholder:text-ink/25 focus:outline-none focus:ring-1 resize-none transition disabled:opacity-60 ${
+                  listening
+                    ? 'border-crimson/50 focus:border-crimson focus:ring-crimson/30'
+                    : 'border-ink/20 focus:border-gold focus:ring-gold/30'
+                }`}
+              />
+              {supported && (
+                <button
+                  onClick={toggle}
+                  disabled={loading}
+                  type="button"
+                  title={listening ? 'Stop dictation' : 'Start dictation'}
+                  className={`absolute right-2 bottom-2 p-1.5 rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                    listening
+                      ? 'bg-crimson/10 text-crimson hover:bg-crimson/20 animate-pulse'
+                      : 'text-ink/30 hover:text-ink/60 hover:bg-ink/5'
+                  }`}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+                    {listening ? (
+                      /* Stop icon (filled square) */
+                      <rect x="6" y="6" width="12" height="12" rx="2" />
+                    ) : (
+                      /* Microphone icon */
+                      <path d="M12 1a4 4 0 0 0-4 4v6a4 4 0 0 0 8 0V5a4 4 0 0 0-4-4Zm7 10a1 1 0 1 0-2 0 5 5 0 0 1-10 0 1 1 0 1 0-2 0 7 7 0 0 0 6 6.93V21H8a1 1 0 1 0 0 2h8a1 1 0 1 0 0-2h-3v-3.07A7 7 0 0 0 19 11Z" />
+                    )}
+                  </svg>
+                </button>
+              )}
+            </div>
           </div>
           <button
             onClick={onSubmit}
