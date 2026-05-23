@@ -28,8 +28,38 @@ export default function Examination() {
     }
   }, [sessionId, subject, topic, navigate]);
 
-  // Load subtopics on mount — calls POST /api/sessions/{id}/subtopics
-  // which also generates the opening examiner turn
+  // Helper: load transcript from session, or show default opening
+  const loadTranscript = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/sessions/${sessionId}`);
+      const session = await r.json();
+      if (session.transcript && session.transcript.length > 0) {
+        const speakerMap = { counsel: 'counsel', judge: 'judge', co_counsel: 'cocounsel', defense: null };
+        session.transcript.forEach((msg) => {
+          if (msg.speaker === 'defense') {
+            store.addMessage({ role: 'user', content: msg.content });
+          } else {
+            store.addMessage({
+              role: 'ai',
+              content: msg.content,
+              speakerRole: speakerMap[msg.speaker] || 'counsel',
+            });
+          }
+        });
+        return;
+      }
+    } catch (err) {
+      console.warn('Failed to load opening transcript:', err);
+    }
+    store.addMessage({
+      role: 'ai',
+      content: 'Court is now in session. Counsel, please state your understanding of the subject matter at hand.',
+      speakerRole: 'judge',
+    });
+  }, [sessionId]);
+
+  // Initialize session: try lesson plan first (creates subtopics from
+  // matters), fall back to subtopics endpoint, then load transcript.
   useEffect(() => {
     if (initRef.current || !sessionId || !subject || !topic) return;
     initRef.current = true;
@@ -40,71 +70,58 @@ export default function Examination() {
     }
 
     setLoading(true);
-    fetch(`/api/sessions/${sessionId}/subtopics`, { method: 'POST' })
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then((data) => {
-        store.initSubtopics(data.subtopics);
-        setSubtopicsLoaded(true);
-        // Fetch the case file (lesson plan) if available
-        fetch(`/api/sessions/${sessionId}/lesson-plan`)
-          .then((r) => (r.ok ? r.json() : null))
-          .then((plan) => {
-            if (plan) store.setCaseFile(plan);
-          })
-          .catch(() => {});
-        // Fetch the session transcript for the opening turn
-        return fetch(`/api/sessions/${sessionId}`)
-          .then((r) => r.json())
-          .then((session) => {
-            if (session.transcript && session.transcript.length > 0) {
-              session.transcript.forEach((msg) => {
-                const speakerMap = { counsel: 'counsel', judge: 'judge', co_counsel: 'cocounsel', defense: null };
-                if (msg.speaker === 'defense') {
-                  store.addMessage({ role: 'user', content: msg.content });
-                } else {
-                  store.addMessage({
-                    role: 'ai',
-                    content: msg.content,
-                    speakerRole: speakerMap[msg.speaker] || 'counsel',
-                  });
-                }
-              });
-            } else {
-              store.addMessage({
-                role: 'ai',
-                content: 'Court is now in session. Counsel, please state your understanding of the subject matter at hand.',
-                speakerRole: 'judge',
-              });
+
+    (async () => {
+      let gotSubtopics = false;
+
+      // 1. Try lesson plan — this creates subtopics from matters
+      try {
+        const planRes = await fetch(`/api/sessions/${sessionId}/lesson-plan`, { method: 'POST' });
+        if (planRes.ok) {
+          const plan = await planRes.json();
+          store.setCaseFile(plan);
+          const matterNames = plan.matters.map((m) => m.label);
+          store.initSubtopics(matterNames);
+          gotSubtopics = true;
+        }
+      } catch (err) {
+        console.warn('Lesson plan generation failed, falling back to subtopics:', err);
+      }
+
+      // 2. Fall back to subtopics endpoint if lesson plan unavailable
+      if (!gotSubtopics) {
+        try {
+          const subRes = await fetch(`/api/sessions/${sessionId}/subtopics`, { method: 'POST' });
+          if (!subRes.ok) throw new Error(`HTTP ${subRes.status}`);
+          const data = await subRes.json();
+          store.initSubtopics(data.subtopics);
+          gotSubtopics = true;
+          // Also try to fetch case file in case it exists
+          try {
+            const cfRes = await fetch(`/api/sessions/${sessionId}/lesson-plan`);
+            if (cfRes.ok) {
+              const plan = await cfRes.json();
+              store.setCaseFile(plan);
             }
-          })
-          .catch((err) => {
-            console.warn('Failed to load opening transcript:', err);
-            store.addMessage({
-              role: 'ai',
-              content: 'Court is now in session. Counsel, please state your understanding of the subject matter at hand.',
-              speakerRole: 'judge',
-            });
-          });
-      })
-      .catch((err) => {
-        console.error('Failed to load subtopics:', err);
-        store.initSubtopics([
-          'Core Definitions & Concepts',
-          'Fundamental Principles',
-          'Real-World Applications',
-          'Advanced Edge Cases',
-        ]);
-        setSubtopicsLoaded(true);
-        store.addMessage({
-          role: 'ai',
-          content: 'Court is now in session. Counsel, please state your understanding of the subject matter at hand.',
-          speakerRole: 'judge',
-        });
-      })
-      .finally(() => setLoading(false));
+          } catch (_) {}
+        } catch (err) {
+          console.error('Failed to load subtopics:', err);
+          store.initSubtopics([
+            'Core Definitions & Concepts',
+            'Fundamental Principles',
+            'Real-World Applications',
+            'Advanced Edge Cases',
+          ]);
+        }
+      }
+
+      setSubtopicsLoaded(true);
+
+      // 3. Load transcript / opening turn
+      await loadTranscript();
+
+      setLoading(false);
+    })();
   }, [sessionId, subject, topic]);
 
   useEffect(() => {
