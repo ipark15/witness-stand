@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from witness_stand import __version__
-from witness_stand.ai import GemmaLLM, LLMError
+from witness_stand.ai import FileLLM, GemmaLLM, LLMError
 from witness_stand.api import api_router
 from witness_stand.api._deps import get_llm_dep, get_session_store_dep
 from witness_stand.config import Settings, get_settings
@@ -28,16 +28,18 @@ from witness_stand.logging_setup import (
 from witness_stand.services import JsonFileSessionStore
 
 
-def _build_llm(settings: Settings) -> GemmaLLM:
+def _build_llm(settings: Settings) -> GemmaLLM | FileLLM:
     provider = settings.llm_provider.lower()
-    if provider != "gemma":
-        raise LLMError(
-            f"Unsupported LLM_PROVIDER {provider!r}; only 'gemma' is implemented.",
-            provider=provider,
+    if provider == "file":
+        return FileLLM(data_dir=settings.data_dir)
+    if provider == "gemma":
+        return GemmaLLM(
+            api_key=settings.resolved_google_api_key,
+            model=settings.gemma_model,
         )
-    return GemmaLLM(
-        api_key=settings.resolved_google_api_key,
-        model=settings.gemma_model,
+    raise LLMError(
+        f"Unsupported LLM_PROVIDER {provider!r}; supported: 'gemma', 'file'.",
+        provider=provider,
     )
 
 
