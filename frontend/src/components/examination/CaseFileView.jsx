@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import SectionHeading from '../ui/SectionHeading.jsx';
 
 const CATEGORY_STYLES = {
@@ -74,6 +74,7 @@ function NodeRow({ node }) {
 
 function MatterCard({ matter, isCurrent, index }) {
   const [expanded, setExpanded] = useState(isCurrent);
+  useEffect(() => { if (isCurrent) setExpanded(true); }, [isCurrent]);
   const allCovered = matter.children.every((c) => c.status === 'covered');
   const anyProgress = matter.children.some((c) => c.status !== 'pending');
 
