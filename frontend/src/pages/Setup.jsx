@@ -1,14 +1,9 @@
 import { useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useSessionStore from '../store/sessionStore.js';
-
-const INTENSITIES = ['Preliminary', 'Trial', 'Appeal'];
-
-const INTENSITY_DESC = {
-  Preliminary: 'Gentle probing, foundational questions',
-  Trial: 'Rigorous cross-examination, no mercy',
-  Appeal: 'Relentless, expert-level pressure',
-};
+import { INTENSITIES, INTENSITY_DESC } from '../lib/constants.js';
+import AppHeader from '../components/layout/AppHeader.jsx';
+import ScoreBar from '../components/ui/ScoreBar.jsx';
 
 const CASE_HISTORY = [
   {
@@ -60,7 +55,6 @@ export default function Setup() {
     setError(null);
 
     try {
-      // 1. Create backend session
       const sessionRes = await fetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -77,7 +71,6 @@ export default function Setup() {
       const session = await sessionRes.json();
       const sessionId = session.id;
 
-      // 2. Upload files if any
       if (fileObjects.length > 0) {
         for (const f of fileObjects) {
           const formData = new FormData();
@@ -92,7 +85,6 @@ export default function Setup() {
         }
       }
 
-      // 3. Set local state and navigate
       setSession(sessionId, subject.trim(), topic.trim(), intensity);
       navigate('/examination');
     } catch (err) {
@@ -126,21 +118,12 @@ export default function Setup() {
 
   return (
     <div className="min-h-screen bg-parchment font-serif">
-      {/* Header */}
-      <header className="bg-navy px-8 py-5 flex items-center justify-between shadow-md">
-        <div>
-          <h1 className="text-gold font-serif text-2xl tracking-widest uppercase">
-            The Witness Stand
-          </h1>
-          <p className="text-parchment/50 font-sans text-xs tracking-widest uppercase mt-0.5">
-            Academic Cross-Examination System
-          </p>
-        </div>
+      <AppHeader subtitle="Academic Cross-Examination System">
         <div className="text-parchment/30 font-sans text-xs tracking-widest">Est. MMXXIV</div>
-      </header>
+      </AppHeader>
 
       <div className="max-w-6xl mx-auto px-6 py-10 grid grid-cols-1 lg:grid-cols-2 gap-10">
-        {/* ── Left Column ─────────────────────────────────────────────── */}
+        {/* Left Column */}
         <div>
           {/* Tabs */}
           <div className="flex border-b border-gold/30 mb-7">
@@ -265,18 +248,7 @@ export default function Setup() {
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div className="flex-1 h-1.5 bg-ink/10 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full ${
-                          c.score >= 70
-                            ? 'bg-green-500'
-                            : c.score >= 40
-                            ? 'bg-gold'
-                            : 'bg-crimson'
-                        }`}
-                        style={{ width: `${c.score}%` }}
-                      />
-                    </div>
+                    <ScoreBar value={c.score} height="h-1.5" className="flex-1" />
                     <span className="font-sans text-xs text-ink/40 w-12 text-right">
                       {c.score}/100
                     </span>
@@ -287,7 +259,7 @@ export default function Setup() {
           )}
         </div>
 
-        {/* ── Right Column ─────────────────────────────────────────────── */}
+        {/* Right Column */}
         <div>
           <h2 className="font-sans text-xs text-ink/55 uppercase tracking-widest mb-4">
             Evidence Submission

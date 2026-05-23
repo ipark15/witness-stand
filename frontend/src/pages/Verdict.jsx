@@ -1,6 +1,11 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useSessionStore from '../store/sessionStore.js';
+import AppHeader from '../components/layout/AppHeader.jsx';
+import ScoreBar from '../components/ui/ScoreBar.jsx';
+import SectionHeading from '../components/ui/SectionHeading.jsx';
+import { getScoreTextColor } from '../lib/scoring.js';
+import { VERDICT_THRESHOLDS } from '../lib/constants.js';
 
 const VERDICT_CONFIG = {
   Acquitted: {
@@ -85,9 +90,9 @@ export default function Verdict() {
       label: 'Jury Favor',
       value: overallScore,
       desc:
-        overallScore >= 70
+        overallScore >= VERDICT_THRESHOLDS.ACQUITTED
           ? 'The jury found your arguments persuasive.'
-          : overallScore >= 40
+          : overallScore >= VERDICT_THRESHOLDS.HUNG_JURY
           ? 'The jury was partially convinced.'
           : 'The jury was not persuaded.',
     },
@@ -100,15 +105,7 @@ export default function Verdict() {
 
   return (
     <div className="min-h-screen bg-parchment font-serif">
-      {/* Header */}
-      <header className="bg-navy px-8 py-5 shadow-md">
-        <h1 className="text-gold font-serif text-2xl tracking-widest uppercase">
-          The Witness Stand
-        </h1>
-        <p className="text-parchment/45 font-sans text-xs tracking-widest uppercase mt-0.5">
-          Final Verdict — {subject}: {topic}
-        </p>
-      </header>
+      <AppHeader subtitle={`Final Verdict — ${subject}: ${topic}`} />
 
       <div className="max-w-3xl mx-auto px-6 py-12">
         {/* Verdict Banner */}
@@ -132,9 +129,7 @@ export default function Verdict() {
         <div className="bg-white/50 border border-ink/10 rounded-2xl p-6 mb-6 shadow-sm">
           <div className="flex items-end justify-between mb-4">
             <div>
-              <h3 className="font-sans text-xs text-ink/45 uppercase tracking-widest mb-1">
-                Jury Favor Score
-              </h3>
+              <SectionHeading className="mb-1">Jury Favor Score</SectionHeading>
               <div className="flex items-baseline gap-1">
                 <span className="font-serif text-5xl text-ink">{overallScore}</span>
                 <span className="font-serif text-2xl text-ink/35">/100</span>
@@ -142,11 +137,10 @@ export default function Verdict() {
             </div>
             <div className="text-right">
               <p className="font-sans text-xs text-ink/40 mb-0.5">Threshold to Acquit</p>
-              <p className="font-sans text-sm text-green-600 font-semibold">≥ 70</p>
+              <p className="font-sans text-sm text-green-600 font-semibold">≥ {VERDICT_THRESHOLDS.ACQUITTED}</p>
             </div>
           </div>
           <div className="h-4 bg-ink/8 rounded-full overflow-hidden relative">
-            {/* Threshold markers */}
             <div className="absolute top-0 bottom-0 left-[40%] w-px bg-gold/50" />
             <div className="absolute top-0 bottom-0 left-[70%] w-px bg-green-400/60" />
             <div
@@ -156,17 +150,15 @@ export default function Verdict() {
           </div>
           <div className="flex justify-between mt-1.5 font-sans text-xs text-ink/35">
             <span>0 — Guilty</span>
-            <span>40 — Hung</span>
-            <span>70 — Acquitted</span>
+            <span>{VERDICT_THRESHOLDS.HUNG_JURY} — Hung</span>
+            <span>{VERDICT_THRESHOLDS.ACQUITTED} — Acquitted</span>
             <span>100</span>
           </div>
         </div>
 
         {/* Criteria Breakdown */}
         <div className="bg-white/50 border border-ink/10 rounded-2xl p-6 mb-8 shadow-sm">
-          <h3 className="font-sans text-xs text-ink/45 uppercase tracking-widest mb-5">
-            Evidence Quality Breakdown
-          </h3>
+          <SectionHeading className="mb-5">Evidence Quality Breakdown</SectionHeading>
           <div className="space-y-4">
             {criteria.map((c, i) => (
               <div key={i}>
@@ -177,27 +169,12 @@ export default function Verdict() {
                   </span>
                   <div className="flex items-baseline gap-2">
                     <span className="font-sans text-xs text-ink/40">{c.desc}</span>
-                    <span
-                      className={`font-sans text-sm font-semibold ${
-                        c.value >= 70
-                          ? 'text-green-600'
-                          : c.value >= 40
-                          ? 'text-gold'
-                          : 'text-crimson'
-                      }`}
-                    >
+                    <span className={`font-sans text-sm font-semibold ${getScoreTextColor(c.value)}`}>
                       {c.value}
                     </span>
                   </div>
                 </div>
-                <div className="h-2 bg-ink/8 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all duration-700 ${
-                      c.value >= 70 ? 'bg-green-500' : c.value >= 40 ? 'bg-gold' : 'bg-crimson'
-                    }`}
-                    style={{ width: `${c.value}%` }}
-                  />
-                </div>
+                <ScoreBar value={c.value} />
               </div>
             ))}
           </div>
