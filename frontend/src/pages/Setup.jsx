@@ -108,13 +108,13 @@ export default function Setup() {
     setDragOver(false);
     const files = Array.from(e.dataTransfer.files);
     files.forEach((f) => addFile({ name: f.name, size: f.size }));
-    setFileObjects((prev) => [...prev, ...files]);
+    setFileObjects((prev) => [...prev.filter((fo) => !files.some((f) => f.name === fo.name)), ...files]);
   };
 
   const handleFileInput = (e) => {
     const files = Array.from(e.target.files);
     files.forEach((f) => addFile({ name: f.name, size: f.size }));
-    setFileObjects((prev) => [...prev, ...files]);
+    setFileObjects((prev) => [...prev.filter((fo) => !files.some((f) => f.name === fo.name)), ...files]);
     e.target.value = '';
   };
 

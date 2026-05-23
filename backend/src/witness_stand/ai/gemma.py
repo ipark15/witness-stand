@@ -300,7 +300,7 @@ class GemmaLLM(LLM):
         bound = logger.bind(
             llm_provider=_PROVIDER_NAME,
             llm_model=self.model,
-            structured=config.response_schema is not None,
+            structured=config.response_mime_type == "application/json",
             content_parts=len(contents),
         )
         bound.debug("llm_call_start")
