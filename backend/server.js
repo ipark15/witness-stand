@@ -1,25 +1,13 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import Anthropic from '@anthropic-ai/sdk';
+import { generate, providerName, modelName } from './llm.js';
 
 dotenv.config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
-
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
-async function callClaude(prompt) {
-  const message = await anthropic.messages.create({
-    model: 'claude-haiku-4-5',
-    max_tokens: 300,
-    temperature: 0.85,
-    messages: [{ role: 'user', content: prompt }],
-  });
-  return message.content[0].text.trim();
-}
 
 function computeScoring(userMessage, topic) {
   const words = userMessage.trim().split(/\s+/).filter(Boolean);
@@ -79,7 +67,7 @@ app.post('/api/subtopics', async (req, res) => {
   const prompt = `Generate exactly 4 specific academic subtopics for a student being cross-examined on "${topic}" within the subject of ${subject}. Each subtopic should be a concise phrase (4–7 words). Return ONLY a valid JSON array of 4 strings, nothing else. Example format: ["Subtopic One Here", "Subtopic Two Here", "Subtopic Three Here", "Subtopic Four Here"]`;
 
   try {
-    const raw = await callClaude(prompt);
+    const raw = await generate(prompt);
     const match = raw.match(/\[[\s\S]*?\]/);
     if (match) {
       const subtopics = JSON.parse(match[0]);
@@ -129,7 +117,7 @@ Give a brief hint (2–4 sentences) that:
 Keep it under 80 words. Stay in courtroom voice.`;
 
   try {
-    const hint = await callClaude(prompt);
+    const hint = await generate(prompt);
     res.json({ hint });
   } catch (err) {
     console.error('Co-counsel error:', err.message);
@@ -195,7 +183,7 @@ ${userMessage}
 Respond now as the examiner:`;
 
   try {
-    const rawText = await callClaude(prompt);
+    const rawText = await generate(prompt);
 
     let role = 'counsel';
     let cleanMessage = rawText;
@@ -223,4 +211,8 @@ Respond now as the examiner:`;
 });
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`Witness Stand backend running on http://localhost:${PORT}`));
+app.listen(PORT, () =>
+  console.log(
+    `Witness Stand backend running on http://localhost:${PORT} [provider=${providerName}, model=${modelName}]`
+  )
+);
