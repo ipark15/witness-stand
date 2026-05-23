@@ -208,7 +208,7 @@ async def submit_turn(
                 current_matter=current_matter,
             )
             eval_history = build_evaluation_history(
-                transcript=session.transcript,
+                transcript=session.transcript[:-2],
                 new_defense_message=body.message,
             )
             try:
