@@ -2,6 +2,7 @@ import { create } from 'zustand';
 
 const useSessionStore = create((set, get) => ({
   // Session config
+  sessionId: null,
   subject: '',
   topic: '',
   intensity: 'Trial',
@@ -15,7 +16,7 @@ const useSessionStore = create((set, get) => ({
   subtopicScores: [], // [{ name, quality }]
 
   // Messages
-  messages: [], // [{ id, role: 'user'|'ai', content, speakerRole: 'counsel'|'judge' }]
+  messages: [], // [{ id, role: 'user'|'ai', content, speakerRole: 'counsel'|'judge'|'cocounsel' }]
 
   // Files
   uploadedFiles: [],
@@ -28,8 +29,9 @@ const useSessionStore = create((set, get) => ({
 
   // ── Actions ──────────────────────────────────────────────────────────
 
-  setSession: (subject, topic, intensity) =>
+  setSession: (sessionId, subject, topic, intensity) =>
     set({
+      sessionId,
       subject,
       topic,
       intensity,
@@ -38,6 +40,7 @@ const useSessionStore = create((set, get) => ({
       juryFavor: 50,
       subtopicScores: [],
       messages: [],
+      uploadedFiles: [],
       view: 'examination',
       verdict: null,
     }),
@@ -79,6 +82,22 @@ const useSessionStore = create((set, get) => ({
   setView: (view) => set({ view }),
 
   setVerdict: (verdict) => set({ verdict }),
+
+  reset: () =>
+    set({
+      sessionId: null,
+      subject: '',
+      topic: '',
+      intensity: 'Trial',
+      subtopics: [],
+      currentSubtopicIndex: 0,
+      juryFavor: 50,
+      subtopicScores: [],
+      messages: [],
+      uploadedFiles: [],
+      view: 'examination',
+      verdict: null,
+    }),
 }));
 
 export default useSessionStore;
