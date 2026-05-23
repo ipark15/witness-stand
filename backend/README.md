@@ -1,6 +1,9 @@
 # Witness Stand — Backend
 
-Express service that powers the courtroom-style examination app. All AI generation goes through a single provider-agnostic layer, so the underlying LLM (Claude or Gemini/Gemma) can be swapped via a single environment variable — no code changes, no frontend changes.
+FastAPI service that powers the courtroom-style academic cross-examination
+app. All LLM calls go through a single provider-agnostic interface
+(`src/witness_stand/ai/base.py`); the current implementation is **Gemma 4**
+via Google's `google-genai` SDK.
 
 ---
 
@@ -8,132 +11,124 @@ Express service that powers the courtroom-style examination app. All AI generati
 
 ```bash
 cd backend
-cp .env.example .env        # fill in keys, pick a provider
-npm install
-npm run dev                  # node --watch server.js
+cp .env.example .env        # fill in GOOGLE_API_KEY
+uv sync                      # creates .venv, installs locked deps
+uv run fastapi dev src/witness_stand/main.py
 ```
 
-On boot you'll see which provider/model is live:
+Server listens on `http://localhost:8000` by default. The Vite frontend
+(`http://localhost:5173`) is allowed via CORS out of the box.
 
-```
-Witness Stand backend running on http://localhost:3001 [provider=gemini, model=gemma-4-26b-a4b-it]
-```
+Sanity check the wiring:
 
-The frontend (Vite, port 5173) proxies `/api/*` to this server.
+```bash
+curl -s localhost:8000/healthz | jq
+# {"status": "ok", "version": "0.1.0", "provider": "gemma", "model": "gemma-4-26b-a4b-it"}
+```
 
 ---
 
 ## Environment variables
 
-| Variable | Required | Default | Notes |
+| Variable           | Required | Default                  | Notes |
 |---|---|---|---|
-| `LLM_PROVIDER` | yes | `gemini` | `gemini` (default) or `claude` |
-| `GEMINI_API_KEY` | when `LLM_PROVIDER=gemini` | — | Google AI Studio key; works for both Gemini and Gemma models (Gemma is free) |
-| `GEMINI_MODEL` | no | `gemma-4-26b-a4b-it` | e.g. `gemma-4-26b-a4b-it`, `gemini-2.5-flash`, `gemini-2.5-pro` |
-| `ANTHROPIC_API_KEY` | when `LLM_PROVIDER=claude` | — | Loaded only when Claude is selected |
-| `CLAUDE_MODEL` | no | `claude-haiku-4-5` | Any Anthropic chat model id |
-| `PORT` | no | `3001` | Server port |
-
-The wrapper **fails fast at boot** if the required key for the selected provider is missing.
-
----
-
-## Switching providers
-
-Edit `.env` only — restart the server, every AI feature picks up the change.
-
-**Use Gemma 4 26B (default — free, open-weights, slower):**
-```env
-LLM_PROVIDER=gemini
-GEMINI_API_KEY=...
-GEMINI_MODEL=gemma-4-26b-a4b-it
-```
-
-**Use Gemini 2.5 Flash (paid, fast):**
-```env
-LLM_PROVIDER=gemini
-GEMINI_API_KEY=AIza...
-GEMINI_MODEL=gemini-2.5-flash
-```
-
-**Use Claude:**
-```env
-LLM_PROVIDER=claude
-ANTHROPIC_API_KEY=sk-ant-...
-```
-
-You can also override per-invocation without touching `.env`:
-
-```bash
-LLM_PROVIDER=gemini GEMINI_MODEL=gemma-4-26b-a4b-it npm run dev
-```
+| `LLM_PROVIDER`     | no       | `gemma`                  | Only `gemma` is implemented today. |
+| `GOOGLE_API_KEY` *or* `GEMINI_API_KEY` | yes (for gemma) | — | Google AI Studio key. |
+| `GEMMA_MODEL`      | no       | `gemma-4-26b-a4b-it`     | Any Gemma 4 model id. |
+| `PORT`             | no       | `8000`                   | |
+| `DATA_DIR`         | no       | `./data`                 | Session JSON + temp uploads. |
 
 ---
 
 ## Architecture
 
 ```
-frontend (Vite, :5173)
-        │  fetch('/api/...')
-        ▼  (proxied)
-server.js (Express, :3001)
-   ├── /api/subtopics    ┐
-   ├── /api/co-counsel   │── all call generate(prompt)
-   └── /api/examine      ┘
+frontend (Vite :5173)
+        │  fetch('/api/sessions/...')   (proxied)
+        ▼
+FastAPI (:8000)
+   ├── /healthz
+   ├── /api/sessions             create / get / delete
+   ├── /api/sessions/{id}/files  multipart upload → google File API
+   ├── /api/sessions/{id}/subtopics    file-grounded planner + opening turn
+   ├── /api/sessions/{id}/turns        opposition cross-examination
+   └── /api/sessions/{id}/co-counsel   private hint with jury penalty
                   │
                   ▼
-            llm.js
-              │
-   ┌──────────┴──────────┐
-   ▼                     ▼
-@anthropic-ai/sdk    @google/genai
-   (Claude)          (Gemini / Gemma)
+           LLM Protocol (src/witness_stand/ai/base.py)
+                  │
+                  ▼
+           GemmaLLM via google-genai
 ```
 
-### `llm.js` — the provider layer
+### The `LLM` Protocol
 
-Exports a single function plus metadata:
+Every route talks to an `LLM` and exchanges ordinary Python values
+(strings, `ChatMessage` lists, Pydantic models). Two modalities:
 
-```js
-import { generate, providerName, modelName } from './llm.js';
+| Method                          | Purpose                                    |
+|---|---|
+| `text()`                        | single-turn plain completion               |
+| `structured()`                  | single-turn JSON validated by a Pydantic schema |
+| `with_files()`                  | single-turn multimodal                     |
+| `structured_with_files()`       | single-turn multimodal + JSON              |
+| `chat()`                        | multi-turn plain completion                |
+| `structured_chat()`             | multi-turn JSON                            |
+| `structured_chat_with_files()`  | multi-turn JSON grounded on files          |
+| `upload_file()`                 | push a local file to the provider          |
 
-const text = await generate(prompt, { maxTokens: 300, temperature: 0.85 });
-```
+Multi-turn methods take `list[ChatMessage]` with `role: 'user' | 'model'`
+and let the provider see the actual back-and-forth (and cache the prefix
+on its side). The opposition examiner uses these; subtopic planning and
+the opening turn use the single-turn methods.
 
-- **Dynamic import** — only the SDK for the selected provider is loaded at runtime. If you only ever run with `LLM_PROVIDER=gemini`, the Anthropic SDK is never touched (and vice versa).
-- **Identical signature** for both providers (`prompt → string`), so routes are provider-agnostic.
-- **Defaults**: `maxTokens=300`, `temperature=0.85`. Override per call.
+### Roles are endpoint-determined
 
-### `server.js` — three routes
+The old prototype parsed model output to decide whether a message was the
+Judge or Counsel. That is gone. Roles are determined by which endpoint
+produced the message:
 
-All three accept JSON POSTs and return JSON.
+* `/turns` → **opposition counsel** (always)
+* `/co-counsel` → **co-counsel** (always)
+* Judge transitions are templated strings the backend picks from
+  `JUDGE_TRANSITIONS` whenever the opposition's structured response sets
+  `advance=true`. No LLM call.
 
-| Route | Body | Response |
-|---|---|---|
-| `POST /api/subtopics` | `{ subject, topic }` | `{ subtopics: string[4] }` |
-| `POST /api/co-counsel` | `{ subject, topic, currentSubtopic, messageHistory }` | `{ hint: string }` |
-| `POST /api/examine` | `{ subject, topic, intensity, messageHistory, currentSubtopic, juryFavor, userMessage }` | `{ role, message, qualityDelta, juryDelta, advanceSubtopic }` |
+### Prompt layout
 
-All prompts are plain-text strings with a single user turn — no provider-specific features (system prompts, tools, streaming). This is what makes the abstraction trivial.
+Persona instructions are editable text under `backend/prompts/*.md`.
+Per-call composition is in `src/witness_stand/ai/prompts/`. State that's
+stable for a session (subject/topic/intensity) lives in the system
+instruction; per-turn mutable state (current subtopic, jury favor) is
+prepended to the latest user message so the system instruction stays
+identical across calls and the prefix stays cacheable.
+
+### Logging
+
+Loguru via `src/witness_stand/logging_setup.py`. The HTTP middleware
+binds a `request_id` (and `session_id` when present in the URL) onto
+every log line emitted during a request. LLM calls log model, duration,
+and token counts.
+
+---
+
+## File ingestion
+
+`POST /api/sessions/{id}/files` accepts multipart uploads (PDF, DOCX,
+images, etc.). Each file is streamed to a temp path, handed to the
+provider's File API, and the resulting handle is persisted in the
+session. Subsequent calls to subtopics / turns are file-grounded when
+valid handles are still attached.
+
+Google's File API expires uploads after ~48h. When a handle expires the
+backend prunes it on read and surfaces `files_expired: true` in
+`GET /api/sessions/{id}` so the frontend can prompt re-upload.
 
 ---
 
 ## Adding a new provider
 
-1. Add the SDK to `package.json`.
-2. In `llm.js`, add a new branch alongside the existing `claude` / `gemini` blocks that:
-   - Dynamically imports the SDK
-   - Validates its API key from env
-   - Assigns `generateFn = async (prompt, { maxTokens, temperature }) => string`
-3. Update `.env.example` with the new keys.
-4. Done — all three routes work with the new provider automatically.
-
----
-
-## Notes on Gemma
-
-Gemma models are served through the same `@google/genai` SDK and same `models.generateContent` endpoint as Gemini — no code changes needed beyond setting `GEMINI_MODEL`. Caveats:
-
-- **Latency**: Gemma 4 26B is noticeably slower than `gemini-2.5-flash` (observed ~20s for short prompts in testing). Consider Flash for interactive endpoints if responsiveness matters.
-- **Token budget**: Gemma's tokenizer differs from Claude's; if outputs feel truncated, bump `maxTokens` in the relevant `generate()` call.
-- **Format compliance**: the `/api/subtopics` route expects a JSON array and the `/api/examine` route expects `[COUNSEL]` / `[JUDGE]` / `[ADVANCE]` tags. Smaller models may follow these conventions less reliably — `server.js` already has regex-based extraction and fallback subtopics to handle that.
+1. Add the SDK to `pyproject.toml` via `uv add`.
+2. Create `src/witness_stand/ai/<name>.py` implementing the `LLM`
+   Protocol (eight methods).
+3. Wire it into `_build_llm()` in `src/witness_stand/main.py`.
