@@ -33,6 +33,7 @@ from oyez.schemas.lesson_plan import LessonPlan
 OPPOSITION_PREFIX = "[Opposing Counsel] "
 CO_COUNSEL_PREFIX = "[Co-Counsel] "
 CO_COUNSEL_TRIGGER = "(Defense whispers to co-counsel privately.)"
+POST_TRIAL_PREFIX = "[Defense, post-trial] "
 
 
 def _new_session_id() -> str:
@@ -146,6 +147,21 @@ class Session(BaseModel):
         self.chat_log.append(ChatMessage(role="user", content=CO_COUNSEL_TRIGGER))
         self.chat_log.append(
             ChatMessage(role="model", content=CO_COUNSEL_PREFIX + aside)
+        )
+
+    def append_post_trial_to_chat(self, *, question: str, answer: str) -> None:
+        """Persist a post-trial Q&A pair to chat_log.
+
+        Unlike in-trial co-counsel consultations (which use a stable
+        content-free trigger for cacheability), post-trial questions are
+        free-form and persisted with their actual content so subsequent
+        questions in the same conversation see the prior dialogue.
+        """
+        self.chat_log.append(
+            ChatMessage(role="user", content=POST_TRIAL_PREFIX + question)
+        )
+        self.chat_log.append(
+            ChatMessage(role="model", content=CO_COUNSEL_PREFIX + answer)
         )
 
     # ── backfill ─────────────────────────────────────────────────────────

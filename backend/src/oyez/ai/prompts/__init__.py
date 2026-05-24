@@ -26,6 +26,10 @@ from oyez.ai.prompts.opposition import (
     build_opposition_system,
     compose_opposition_defense_turn,
 )
+from oyez.ai.prompts.post_trial import (
+    build_post_trial_co_counsel_system,
+    build_post_trial_user_turn,
+)
 from oyez.ai.prompts.subtopic_planner import (
     build_subtopic_planner_prompt,
     build_subtopic_planner_system,
@@ -41,6 +45,8 @@ __all__ = [
     "build_opposition_opening_turn",
     "build_opposition_system",
     "compose_opposition_defense_turn",
+    "build_post_trial_co_counsel_system",
+    "build_post_trial_user_turn",
     "build_subtopic_planner_prompt",
     "build_subtopic_planner_system",
 ]
