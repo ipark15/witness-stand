@@ -51,6 +51,49 @@ const useSessionStore = create((set, get) => ({
       verdict: null,
     }),
 
+  // Hydrate the store from a server SessionState payload. Used when
+  // resuming an in-progress session from Case History — we want the
+  // freshest persisted progress (subtopic qualities, jury favor, current
+  // matter index, transcript) rather than the defaults `setSession`
+  // installs for new sessions. The case file (lesson plan) lives on a
+  // separate endpoint and should be fetched and `setCaseFile`'d by the
+  // caller after this.
+  hydrateFromSession: (s) =>
+    set({
+      sessionId: s.id,
+      subject: s.subject,
+      topic: s.topic,
+      intensity: s.intensity,
+      subtopics: (s.subtopics || []).map((st) => st.name),
+      subtopicScores: (s.subtopics || []).map((st) => ({
+        name: st.name,
+        quality: st.quality ?? 50,
+      })),
+      currentSubtopicIndex: s.current_subtopic_index ?? 0,
+      juryFavor: s.jury_favor ?? 50,
+      messages: (s.transcript || []).map((msg) => {
+        if (msg.speaker === 'defense') {
+          return { id: msg.id, role: 'user', content: msg.content };
+        }
+        const speakerMap = {
+          counsel: 'counsel',
+          judge: 'judge',
+          co_counsel: 'cocounsel',
+        };
+        return {
+          id: msg.id,
+          role: 'ai',
+          content: msg.content,
+          speakerRole: speakerMap[msg.speaker] || 'counsel',
+        };
+      }),
+      uploadedFiles: [],
+      caseFile: null,
+      evaluationFeedback: '',
+      view: 'examination',
+      verdict: s.verdict ?? null,
+    }),
+
   initSubtopics: (subtopics) =>
     set({
       subtopics,

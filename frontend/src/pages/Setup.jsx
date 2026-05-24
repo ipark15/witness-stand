@@ -20,7 +20,7 @@ function formatRelativeDate(iso) {
 
 export default function Setup() {
   const navigate = useNavigate();
-  const { setSession, addFile, removeFile, uploadedFiles } = useSessionStore();
+  const { setSession, hydrateFromSession, setCaseFile, setView, addFile, removeFile, uploadedFiles } = useSessionStore();
 
   const [tab, setTab] = useState('new');
   const [subject, setSubject] = useState('');
@@ -67,6 +67,33 @@ export default function Setup() {
       cancelled = true;
     };
   }, [tab, history]);
+
+  // Click handler for a Case History row. Completed sessions open the
+  // read-only Review page; in-progress sessions hydrate the store from
+  // the freshest SessionState (which the list already gave us), fetch
+  // the case file, and drop the user back into /examination to continue.
+  const handleHistoryRow = useCallback(
+    async (s) => {
+      if (s.complete) {
+        navigate(`/review/${s.id}`);
+        return;
+      }
+      hydrateFromSession(s);
+      try {
+        const cfRes = await fetch(`/api/sessions/${s.id}/lesson-plan`);
+        if (cfRes.ok) {
+          const plan = await cfRes.json();
+          setCaseFile(plan);
+          setView('casefile');
+        }
+      } catch (err) {
+        // Non-fatal — Examination's init effect will still try to recover.
+        console.warn('Resume: could not pre-fetch case file:', err);
+      }
+      navigate('/examination');
+    },
+    [navigate, hydrateFromSession, setCaseFile, setView],
+  );
 
   // User study mode
   const [studyMode, setStudyMode] = useState(false);
@@ -298,7 +325,12 @@ export default function Setup() {
                   <button
                     key={s.id}
                     type="button"
-                    onClick={() => navigate(`/review/${s.id}`)}
+                    onClick={() => handleHistoryRow(s)}
+                    title={
+                      s.complete
+                        ? 'Open read-only review of this closed case'
+                        : 'Resume this in-progress examination'
+                    }
                     className="w-full text-left border border-gold/20 rounded-lg p-4 bg-white/30 hover:bg-white/60 hover:border-gold/40 transition-colors"
                   >
                     <div className="flex justify-between items-start mb-3 gap-3">
