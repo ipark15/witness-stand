@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = Field(default=None)
     gemma_model: str = Field(default="gemma-4-26b-a4b-it")
 
+    # ── Fixtures ─────────────────────────────────────────────────────────
+    use_fixture_lesson_plan: bool = Field(default=False)
+
     # ── Server ──────────────────────────────────────────────────────────
     port: int = Field(default=8000)
     cors_origins: list[str] = Field(

@@ -22,11 +22,11 @@ def _format_remaining_nodes(matter: CaseFileNode) -> str:
     """Format the remaining (non-covered) leaf nodes for the evaluator."""
     lines: list[str] = []
     for node in matter.children:
-        if node.status == "covered":
+        if node.status in ("covered", "skipped"):
             continue
         lines.append(
             f"- [{node.category.value if node.category else 'group'}] "
-            f"id={node.id!r}, label={node.label!r}\n"
+            f"id={node.id}, label={node.label}\n"
             f"  status: {node.status}\n"
             f"  prompt_hint: {node.prompt_hint}\n"
             f"  answer_key: {node.answer_key}"

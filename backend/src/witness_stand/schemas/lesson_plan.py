@@ -73,13 +73,14 @@ class CaseFileNode(BaseModel):
     )
 
     # ── Mutable state ────────────────────────────────────────────────────
-    status: Literal["pending", "partial", "covered"] = Field(
+    status: Literal["pending", "partial", "covered", "skipped"] = Field(
         default="pending",
         description=(
             "Whether the student has addressed this node. "
             "'pending' = not yet discussed, "
             "'partial' = mentioned but incomplete, "
-            "'covered' = sufficiently explained."
+            "'covered' = sufficiently explained, "
+            "'skipped' = student revealed the answer (not covered)."
         ),
     )
 
@@ -162,14 +163,18 @@ class LessonPlanGeneration(BaseModel):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class CaseFileNodeDTO(BaseModel):
-    """Frontend-safe projection of a case file node (no answer key)."""
+    """Frontend-facing projection of a case file node."""
 
     id: str
     label: str
     category: NodeCategory | None
     prompt_hint: str
     children: list["CaseFileNodeDTO"] = Field(default_factory=list)
-    status: Literal["pending", "partial", "covered"]
+    status: Literal["pending", "partial", "covered", "skipped"]
+    answer_key: str = Field(
+        default="",
+        description="Answer key for reveal-answer feature. Empty for branch nodes.",
+    )
 
 
 CaseFileNodeDTO.model_rebuild()

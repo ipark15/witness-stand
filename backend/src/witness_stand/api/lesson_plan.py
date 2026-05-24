@@ -6,8 +6,6 @@ demos and user studies where token budget matters).
 """
 from __future__ import annotations
 
-import os
-
 from fastapi import APIRouter, HTTPException, status
 
 from witness_stand.ai.base import LLMError
@@ -33,8 +31,6 @@ from witness_stand.schemas.session import SubtopicProgress
 from witness_stand.services.fixtures import load_fixture
 
 router = APIRouter(prefix="/sessions/{session_id}/lesson-plan", tags=["lesson-plan"])
-
-USE_FIXTURES = os.getenv("USE_FIXTURE_LESSON_PLAN", "").lower() in ("true", "1", "yes")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -80,7 +76,7 @@ def _generation_to_plan(gen: LessonPlanGeneration) -> LessonPlan:
 
 
 def _plan_to_response(plan: LessonPlan) -> LessonPlanResponse:
-    """Project the internal plan to the frontend-safe DTO (strips answer keys)."""
+    """Project the internal plan to the frontend-safe DTO."""
 
     def _node_to_dto(node: CaseFileNode) -> CaseFileNodeDTO:
         return CaseFileNodeDTO(
@@ -90,6 +86,7 @@ def _plan_to_response(plan: LessonPlan) -> LessonPlanResponse:
             prompt_hint=node.prompt_hint,
             children=[_node_to_dto(c) for c in node.children],
             status=node.status,
+            answer_key=node.answer_key,
         )
 
     return LessonPlanResponse(
@@ -121,7 +118,9 @@ async def generate_lesson_plan(
     gen: LessonPlanGeneration | None = None
 
     # Try fixture first if enabled
-    if USE_FIXTURES:
+    from witness_stand.config import get_settings
+    use_fixtures = get_settings().use_fixture_lesson_plan
+    if use_fixtures:
         gen = load_fixture(session.subject, session.topic)
         if gen:
             logger.info(
