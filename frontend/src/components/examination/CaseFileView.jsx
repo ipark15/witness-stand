@@ -76,6 +76,7 @@ function HoldToRevealButton({ nodeId }) {
   }, []);
 
   const begin = useCallback(() => {
+    if (startRef.current) return;
     setHolding(true);
     startRef.current = Date.now();
     frameRef.current = requestAnimationFrame(tick);
