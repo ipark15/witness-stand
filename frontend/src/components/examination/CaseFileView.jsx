@@ -181,7 +181,7 @@ export default function CaseFileView({ caseFile, evaluationFeedback, currentSubt
           <span className="text-ink/30">{totalNodes - coveredNodes - partialNodes} remaining</span>
         </div>
       </div>
-      <p className={`font-sans text-ink/40 mb-4 uppercase tracking-widest ${compact ? 'text-[10px]' : 'text-xs mb-6'}`}>
+      <p className={`font-sans text-ink/40 uppercase tracking-widest ${compact ? 'text-[10px] mb-4' : 'text-xs mb-6'}`}>
         {caseFile.topic} — Examination Agenda
       </p>
 
@@ -197,7 +197,7 @@ export default function CaseFileView({ caseFile, evaluationFeedback, currentSubt
       </div>
 
       {evaluationFeedback && (
-        <div className={`mt-4 border border-gold/30 bg-gold/5 rounded-xl ${compact ? 'px-3 py-2.5' : 'px-5 py-4 mt-6'}`}>
+        <div className={`border border-gold/30 bg-gold/5 rounded-xl ${compact ? 'mt-4 px-3 py-2.5' : 'mt-6 px-5 py-4'}`}>
           <SectionHeading className="mb-1">Evaluator Feedback</SectionHeading>
           <p className={`font-serif text-ink/70 leading-relaxed italic ${compact ? 'text-xs' : 'text-sm'}`}>
             {evaluationFeedback}

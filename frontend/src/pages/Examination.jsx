@@ -332,7 +332,7 @@ export default function Examination() {
 
         {/* Case File sidebar — always visible when toggled */}
         {view === 'casefile' && (
-          <aside className="w-80 shrink-0 border-l border-ink/10 bg-white/20 overflow-hidden">
+          <aside className="w-80 shrink-0 border-l border-ink/10 bg-white/20 overflow-hidden flex flex-col">
             <CaseFileView
               caseFile={caseFile}
               evaluationFeedback={evaluationFeedback}
