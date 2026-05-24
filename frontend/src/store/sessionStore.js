@@ -122,6 +122,7 @@ const useSessionStore = create((set, get) => ({
         ...matter,
         children: matter.children.map((node) => {
           if (node.id !== nodeId) return node;
+          if (node.status === 'covered' || node.status === 'skipped') return node;
           return { ...node, status: 'skipped', revealed_answer: node.answer_key || '' };
         }),
       }));
