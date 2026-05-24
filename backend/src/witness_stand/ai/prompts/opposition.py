@@ -5,22 +5,19 @@
   This goes into the LLM call's ``system`` parameter and stays constant
   across every turn of the session, which is what lets the provider
   cache the prefix.
-* ``build_opposition_history(...)`` — converts the session transcript
-  into the ``ChatMessage`` list the LLM expects, omitting roles the model
-  should not see (judge, co-counsel) and prepending the per-turn mutable
-  state header to the most recent defense message.
+* ``compose_opposition_defense_turn(...)`` — composes the user-turn content
+  (state header + defense's testimony) that gets persisted to ``chat_log``.
+  Routes call this once per turn, append it via
+  ``Session.append_defense_to_chat``, and send the chat_log to the LLM.
 * ``build_opposition_opening_turn(...)`` — single-prompt builder for the
   very first examiner turn, before any dialogue exists.
 """
 from __future__ import annotations
 
 from textwrap import dedent
-from typing import Iterable
 
-from witness_stand.ai.base import ChatMessage
 from witness_stand.ai.prompts._loader import fill, load_template
 from witness_stand.constants import INTENSITY_GUIDANCE, Intensity
-from witness_stand.schemas.examiner import TranscriptMessage
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -45,15 +42,16 @@ def build_opposition_system(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Chat history construction
+# Defense-turn composition (state header + testimony)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 def _per_turn_state_header(*, current_subtopic: str, jury_favor: int) -> str:
-    """Tiny block prepended to the latest defense message only.
+    """Tiny block prepended once to the defense turn at write time.
 
-    Keeping per-turn state on the tail (rather than in the system
-    instruction) preserves the cacheable prefix on every prior turn.
+    Once persisted to chat_log this string is frozen there; it does not
+    get rewritten on subsequent calls. That's deliberate — frozen state
+    in history is an accurate record of state-at-the-time-of-turn.
     """
     return dedent(
         f"""
@@ -66,38 +64,22 @@ def _per_turn_state_header(*, current_subtopic: str, jury_favor: int) -> str:
     ).strip() + "\n"
 
 
-def build_opposition_history(
+def compose_opposition_defense_turn(
     *,
-    transcript: Iterable[TranscriptMessage],
     new_defense_message: str,
     current_subtopic: str,
     jury_favor: int,
-) -> list[ChatMessage]:
-    """Turn the session transcript into the chat history the opposition sees.
+) -> str:
+    """Compose the user-turn content for a defense submission.
 
-    Inclusion rules (per design doc):
-      * defense → "user"
-      * past counsel → "model"
-      * judge → omitted (judge is the app; including risks model imitating)
-      * co_counsel → omitted (private to defense)
-
-    The ``new_defense_message`` arrives as the most recent user turn with
-    the per-turn state header prepended.
+    The result is a single string ready to persist to ``chat_log`` as a
+    ``role="user"`` ``ChatMessage`` via ``Session.append_defense_to_chat``.
     """
-    history: list[ChatMessage] = []
-    for msg in transcript:
-        if msg.speaker == "defense":
-            history.append(ChatMessage(role="user", content=msg.content))
-        elif msg.speaker == "counsel":
-            history.append(ChatMessage(role="model", content=msg.content))
-        # judge / co_counsel: skip
-
     header = _per_turn_state_header(
         current_subtopic=current_subtopic,
         jury_favor=jury_favor,
     )
-    history.append(ChatMessage(role="user", content=header + new_defense_message))
-    return history
+    return header + new_defense_message
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -79,10 +79,18 @@ export default function TestimonyInput({
                 <button
                   onClick={onCoCounsel}
                   disabled={loading || coCounselLoading}
-                  title="Consult co-counsel for a hint"
+                  title={
+                    wordCount > 0
+                      ? 'Show your draft to co-counsel for feedback before delivering'
+                      : 'Consult co-counsel for a private nudge'
+                  }
                   className="font-sans text-xs text-emerald-700 border border-emerald-700/30 px-2.5 py-0.5 rounded-md hover:bg-emerald-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
-                  {coCounselLoading ? 'Consulting…' : '⚑ Co-Counsel'}
+                  {coCounselLoading
+                    ? 'Consulting…'
+                    : wordCount > 0
+                    ? '⚑ Check Draft'
+                    : '⚑ Co-Counsel'}
                 </button>
               </div>
               <span

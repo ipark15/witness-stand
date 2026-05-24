@@ -220,9 +220,16 @@ export default function Examination() {
   const handleCoCounsel = useCallback(async () => {
     if (loading || coCounselLoading || !sessionId) return;
     setCoCounselLoading(true);
+    // If the student has typed something into the testimony box, send it
+    // as a draft so co-counsel reacts to *that* rather than offering a
+    // generic stuck-mode nudge. We do NOT clear the textbox — the student
+    // is asking for feedback before delivering, not replacing their draft.
+    const draft = input.trim() ? input.trim() : null;
     try {
       const res = await fetch(`/api/sessions/${sessionId}/co-counsel`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ draft }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -239,7 +246,7 @@ export default function Examination() {
     } finally {
       setCoCounselLoading(false);
     }
-  }, [loading, coCounselLoading, sessionId]);
+  }, [loading, coCounselLoading, sessionId, input]);
 
   const currentSubtopic = subtopics[currentSubtopicIndex] || topic;
   const progressFraction =

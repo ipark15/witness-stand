@@ -10,21 +10,21 @@ want type checking and IDE help for.
 """
 
 from witness_stand.ai.prompts.co_counsel import (
-    build_co_counsel_history,
     build_co_counsel_system,
+    build_co_counsel_user_turn,
 )
 from witness_stand.ai.prompts.evaluation import (
-    build_evaluation_history,
     build_evaluation_system,
+    build_evaluation_user_turn,
 )
 from witness_stand.ai.prompts.lesson_plan import (
     build_lesson_plan_prompt,
     build_lesson_plan_system,
 )
 from witness_stand.ai.prompts.opposition import (
-    build_opposition_history,
     build_opposition_opening_turn,
     build_opposition_system,
+    compose_opposition_defense_turn,
 )
 from witness_stand.ai.prompts.subtopic_planner import (
     build_subtopic_planner_prompt,
@@ -32,15 +32,15 @@ from witness_stand.ai.prompts.subtopic_planner import (
 )
 
 __all__ = [
-    "build_co_counsel_history",
     "build_co_counsel_system",
-    "build_evaluation_history",
+    "build_co_counsel_user_turn",
     "build_evaluation_system",
+    "build_evaluation_user_turn",
     "build_lesson_plan_prompt",
     "build_lesson_plan_system",
-    "build_opposition_history",
     "build_opposition_opening_turn",
     "build_opposition_system",
+    "compose_opposition_defense_turn",
     "build_subtopic_planner_prompt",
     "build_subtopic_planner_system",
 ]

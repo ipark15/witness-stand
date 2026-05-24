@@ -23,12 +23,12 @@ from fastapi import APIRouter, HTTPException, status
 
 from witness_stand.ai.base import LLMError
 from witness_stand.ai.prompts import (
-    build_opposition_history,
     build_opposition_system,
+    compose_opposition_defense_turn,
 )
 from witness_stand.ai.prompts.evaluation import (
-    build_evaluation_history,
     build_evaluation_system,
+    build_evaluation_user_turn,
 )
 from witness_stand.api._deps import (
     LLMDep,
@@ -114,20 +114,16 @@ async def submit_turn(
             ),
         )
 
-    # 1. Build the chat history the opposition sees.
-    history = build_opposition_history(
-        transcript=session.transcript,
+    # 1. Compose the defense's user turn (state header baked in once,
+    #    frozen there forever) and append to both the LLM chat_log and
+    #    the UI transcript.
+    defense_user_content = compose_opposition_defense_turn(
         new_defense_message=body.message,
         current_subtopic=session.current_subtopic,
         jury_favor=session.jury_favor,
     )
-    system_instruction = build_opposition_system(
-        subject=session.subject,
-        topic=session.topic,
-        intensity=session.intensity,
-    )
+    session.append_defense_to_chat(content_with_state_header=defense_user_content)
 
-    # 2. Persist the defense's testimony.
     now = datetime.now(timezone.utc)
     defense_msg = TranscriptMessage(
         id=uuid.uuid4().hex,
@@ -137,35 +133,45 @@ async def submit_turn(
     )
     session.transcript.append(defense_msg)
 
-    # 3. Invoke the opposition.
+    system_instruction = build_opposition_system(
+        subject=session.subject,
+        topic=session.topic,
+        intensity=session.intensity,
+    )
+
+    # 2. Invoke the opposition. The chat_log IS the history (no projection).
     usable_files = fresh_files(session)
     logger.info(
         "opposition_invoke",
-        history_turns=len(history),
+        chat_log_turns=len(session.chat_log),
         with_files=bool(usable_files),
     )
     try:
         if usable_files:
             turn = await llm.structured_chat_with_files(
-                history,
+                session.chat_log,
                 files=usable_files,
                 schema=ExaminerTurn,
                 system=system_instruction,
             )
         else:
             turn = await llm.structured_chat(
-                history,
+                session.chat_log,
                 schema=ExaminerTurn,
                 system=system_instruction,
             )
     except LLMError as exc:
+        # Roll back the chat_log + transcript appends so the conversation
+        # state doesn't end with an unanswered defense turn.
+        session.chat_log.pop()
         session.transcript.pop()
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Opposition unavailable: {exc}",
         ) from exc
 
-    # 4. Persist the opposition's reply.
+    # 3. Persist the opposition's reply to both logs.
+    session.append_opposition_to_chat(message=turn.message)
     counsel_msg = TranscriptMessage(
         id=uuid.uuid4().hex,
         speaker="counsel",
@@ -207,10 +213,11 @@ async def submit_turn(
                 topic=session.topic,
                 current_matter=current_matter,
             )
-            eval_history = build_evaluation_history(
-                transcript=session.transcript[:-2],
-                new_defense_message=body.message,
-            )
+            # The evaluator sees the same chat_log opposition just saw, plus
+            # one transient instruction turn that asks for the rubric check.
+            # We do NOT append the evaluator turn to chat_log — the check is
+            # an internal rubric pass, not part of the conversation.
+            eval_history = session.chat_log + [build_evaluation_user_turn()]
             try:
                 eval_result = await llm.structured_chat(
                     eval_history,

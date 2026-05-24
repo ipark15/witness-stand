@@ -1,20 +1,19 @@
 """Case file evaluation prompt composition.
 
-Builds the system instruction and chat history for the evaluator that
-checks student responses against answer keys and produces checkoff
-updates + constructive feedback.
+Under the unified chat_log design, the evaluator reads the same
+``session.chat_log`` opposition and co-counsel read — it sees the full
+conversation context, including any co-counsel asides. The evaluator
+call is read-only: it does NOT append to chat_log because it's an
+internal "rubric check," not a turn in the conversation.
 
-The evaluator receives the full chat history so it can credit
-understanding demonstrated across multiple turns, not just the latest
-message.
+The transient user turn this module builds carries the evaluator's
+instruction (which case file we're evaluating against, plus a pointer
+to the latest defense testimony already present in chat_log).
 """
 from __future__ import annotations
 
-from typing import Iterable
-
 from witness_stand.ai.base import ChatMessage
 from witness_stand.ai.prompts._loader import fill
-from witness_stand.schemas.examiner import TranscriptMessage
 from witness_stand.schemas.lesson_plan import CaseFileNode
 
 
@@ -51,30 +50,18 @@ def build_evaluation_system(
     )
 
 
-def build_evaluation_history(
-    *,
-    transcript: Iterable[TranscriptMessage],
-    new_defense_message: str,
-) -> list[ChatMessage]:
-    """Build the chat history the evaluator sees.
+def build_evaluation_user_turn() -> ChatMessage:
+    """Build the transient user turn that triggers the evaluator's check.
 
-    Same inclusion rules as the opposition history (defense → user,
-    counsel → model, judge/co_counsel omitted), with an evaluation
-    instruction appended to the latest user message.
+    All conversational context is in ``session.chat_log``; this turn just
+    asks the evaluator to issue its structured verdict. Not persisted.
     """
-    history: list[ChatMessage] = []
-    for msg in transcript:
-        if msg.speaker == "defense":
-            history.append(ChatMessage(role="user", content=msg.content))
-        elif msg.speaker == "counsel":
-            history.append(ChatMessage(role="model", content=msg.content))
-
-    eval_instruction = (
-        f"Student's latest testimony:\n{new_defense_message}\n\n"
-        "Evaluate which case file nodes (if any) the student's "
-        "testimony satisfies. Consider understanding demonstrated "
-        "across the full conversation, not just this single message. "
-        "Be generous with credit."
+    return ChatMessage(
+        role="user",
+        content=(
+            "Evaluate which case file nodes (if any) the student's most "
+            "recent testimony satisfies. Consider understanding demonstrated "
+            "across the full conversation above, not just the latest message. "
+            "Be generous with credit. Return the structured EvaluationResult."
+        ),
     )
-    history.append(ChatMessage(role="user", content=eval_instruction))
-    return history
