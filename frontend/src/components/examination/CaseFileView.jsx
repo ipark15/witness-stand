@@ -111,12 +111,19 @@ function HoldToRevealButton({ nodeId }) {
   );
 }
 
-function NodeRow({ node }) {
+function NodeRow({ node, readOnly }) {
   const statusCfg = STATUS_CONFIG[node.status] || STATUS_CONFIG.pending;
   const isCovered = node.status === 'covered';
   const isSkipped = node.status === 'skipped';
   const isDone = isCovered || isSkipped;
-  const canReveal = !isDone && node.answer_key;
+  // In review mode the case is closed: never offer Hold-to-Reveal (it would
+  // mutate the global session store which isn't even mounted on the Review
+  // page). Instead, disclose the answer key inline for any node that has
+  // one, so reviewers can compare their performance against the rubric.
+  const canReveal = !readOnly && !isDone && node.answer_key;
+  const reviewAnswer = readOnly && (isCovered || (!isSkipped && node.answer_key))
+    ? node.answer_key
+    : null;
 
   return (
     <div
@@ -151,13 +158,21 @@ function NodeRow({ node }) {
             {node.revealed_answer}
           </div>
         )}
+        {reviewAnswer && (
+          <div className="mt-1.5 font-sans text-xs text-ink/55 bg-green-50/50 border border-green-200/60 rounded px-2 py-1.5 leading-relaxed">
+            <span className="font-sans text-[9px] uppercase tracking-wider text-green-700/60 block mb-0.5">
+              Expected answer
+            </span>
+            {reviewAnswer}
+          </div>
+        )}
         {canReveal && <HoldToRevealButton nodeId={node.id} />}
       </div>
     </div>
   );
 }
 
-function MatterCard({ matter, isCurrent, index }) {
+function MatterCard({ matter, isCurrent, index, readOnly }) {
   const [expanded, setExpanded] = useState(isCurrent);
   useEffect(() => { if (isCurrent) setExpanded(true); }, [isCurrent]);
   const allDone = matter.children.every((c) => c.status === 'covered' || c.status === 'skipped');
@@ -221,7 +236,7 @@ function MatterCard({ matter, isCurrent, index }) {
         <div className="px-3 pb-3 border-t border-ink/5">
           <div className="mt-1 space-y-0.5">
             {matter.children.map((node) => (
-              <NodeRow key={node.id} node={node} />
+              <NodeRow key={node.id} node={node} readOnly={readOnly} />
             ))}
           </div>
         </div>
@@ -230,7 +245,7 @@ function MatterCard({ matter, isCurrent, index }) {
   );
 }
 
-export default function CaseFileView({ caseFile, evaluationFeedback, currentSubtopicIndex, compact }) {
+export default function CaseFileView({ caseFile, evaluationFeedback, currentSubtopicIndex, compact, readOnly }) {
   if (!caseFile) {
     return (
       <div className="flex-1 overflow-y-auto p-8 flex items-center justify-center">
@@ -284,6 +299,7 @@ export default function CaseFileView({ caseFile, evaluationFeedback, currentSubt
             matter={matter}
             index={i}
             isCurrent={i === currentSubtopicIndex}
+            readOnly={readOnly}
           />
         ))}
       </div>

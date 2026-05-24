@@ -13,6 +13,21 @@ from oyez.schemas.session import (
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 
+@router.get("", response_model=list[SessionState])
+async def list_sessions(store: SessionStoreDep) -> list[SessionState]:
+    """List every persisted session, freshest first.
+
+    Returns the same wire shape as ``GET /sessions/{id}`` so the frontend's
+    Case History list can show subject / topic / verdict / progress without
+    a per-row follow-up fetch. ``files_expired`` is conservatively reported
+    as False here; review consumers don't need that flag (review is
+    read-only with respect to opposition turns) and computing it per row
+    would mean a TTL check on every file ref in every session.
+    """
+    sessions = await store.list()
+    return [SessionState.from_session(s) for s in sessions]
+
+
 @router.post("", response_model=SessionState, status_code=status.HTTP_201_CREATED)
 async def create_session(
     body: SessionCreate,

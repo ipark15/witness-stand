@@ -1,39 +1,22 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useSessionStore from '../store/sessionStore.js';
 import { INTENSITIES, INTENSITY_DESC } from '../lib/constants.js';
 import AppHeader from '../components/layout/AppHeader.jsx';
 import ScoreBar from '../components/ui/ScoreBar.jsx';
 
-const CASE_HISTORY = [
-  {
-    subject: 'Computer Science',
-    topic: 'Binary Search Trees',
-    date: '2025-03-15',
-    verdict: 'Acquitted',
-    score: 82,
-  },
-  {
-    subject: 'Chemistry',
-    topic: 'Organic Reaction Mechanisms',
-    date: '2025-03-10',
-    verdict: 'Hung Jury',
-    score: 54,
-  },
-  {
-    subject: 'History',
-    topic: 'The French Revolution',
-    date: '2025-03-05',
-    verdict: 'Guilty',
-    score: 31,
-  },
-];
-
 const verdictColor = {
   Acquitted: 'bg-green-100 text-green-700 border-green-200',
   'Hung Jury': 'bg-yellow-100 text-yellow-700 border-yellow-200',
   Guilty: 'bg-red-100 text-red-700 border-red-200',
 };
+
+function formatRelativeDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
 
 export default function Setup() {
   const navigate = useNavigate();
@@ -48,6 +31,37 @@ export default function Setup() {
   const [error, setError] = useState(null);
   const fileInputRef = useRef(null);
   const [fileObjects, setFileObjects] = useState([]);
+
+  // Case History — fetched lazily the first time the user opens the tab so
+  // the New Session form stays snappy on load.
+  const [history, setHistory] = useState(null); // null = not loaded, [] = loaded but empty
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState(null);
+
+  useEffect(() => {
+    if (tab !== 'history' || history !== null || historyLoading) return;
+    setHistoryLoading(true);
+    setHistoryError(null);
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/sessions');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (!cancelled) setHistory(Array.isArray(data) ? data : []);
+      } catch (err) {
+        if (!cancelled) {
+          setHistoryError(err.message || 'Failed to load case history');
+          setHistory([]);
+        }
+      } finally {
+        if (!cancelled) setHistoryLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, history, historyLoading]);
 
   // User study mode
   const [studyMode, setStudyMode] = useState(false);
@@ -253,32 +267,59 @@ export default function Setup() {
             </div>
           ) : (
             <div className="space-y-3">
-              {CASE_HISTORY.map((c, i) => (
-                <div
-                  key={i}
-                  className="border border-gold/20 rounded-lg p-4 bg-white/30 hover:bg-white/50 transition-colors cursor-default"
-                >
-                  <div className="flex justify-between items-start mb-3">
-                    <div>
-                      <p className="font-serif text-ink font-semibold text-base">{c.topic}</p>
-                      <p className="font-sans text-xs text-ink/45 mt-0.5">
-                        {c.subject} · {c.date}
-                      </p>
-                    </div>
-                    <span
-                      className={`font-sans text-xs px-2.5 py-1 rounded border ${verdictColor[c.verdict]}`}
-                    >
-                      {c.verdict}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <ScoreBar value={c.score} height="h-1.5" className="flex-1" />
-                    <span className="font-sans text-xs text-ink/40 w-12 text-right">
-                      {c.score}/100
-                    </span>
-                  </div>
+              {historyLoading && history === null && (
+                <p className="font-serif text-ink/45 italic text-center py-8">
+                  Retrieving case files…
+                </p>
+              )}
+              {historyError && (
+                <div className="bg-crimson/10 border border-crimson/30 rounded-lg px-4 py-2.5 font-sans text-sm text-crimson">
+                  {historyError}
                 </div>
-              ))}
+              )}
+              {history !== null && history.length === 0 && !historyLoading && (
+                <p className="font-serif text-ink/45 italic text-center py-10">
+                  No prior cases on record. Convene one in the New Session tab.
+                </p>
+              )}
+              {(history || []).map((s) => {
+                // Verdict label is empty until a session completes; show
+                // "In Progress" so the row is still meaningful for resumes.
+                const verdictLabel = s.complete ? s.verdict || 'Unknown' : 'In Progress';
+                const verdictCls = s.complete
+                  ? verdictColor[s.verdict] || 'bg-ink/5 text-ink/55 border-ink/15'
+                  : 'bg-ink/5 text-ink/55 border-ink/15';
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => navigate(`/review/${s.id}`)}
+                    className="w-full text-left border border-gold/20 rounded-lg p-4 bg-white/30 hover:bg-white/60 hover:border-gold/40 transition-colors"
+                  >
+                    <div className="flex justify-between items-start mb-3 gap-3">
+                      <div className="min-w-0">
+                        <p className="font-serif text-ink font-semibold text-base truncate">
+                          {s.topic}
+                        </p>
+                        <p className="font-sans text-xs text-ink/45 mt-0.5 truncate">
+                          {s.subject} · {formatRelativeDate(s.updated_at || s.created_at)}
+                        </p>
+                      </div>
+                      <span
+                        className={`font-sans text-xs px-2.5 py-1 rounded border shrink-0 ${verdictCls}`}
+                      >
+                        {verdictLabel}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <ScoreBar value={s.jury_favor ?? 0} height="h-1.5" className="flex-1" />
+                      <span className="font-sans text-xs text-ink/40 w-14 text-right">
+                        {s.jury_favor ?? 0}/100
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>

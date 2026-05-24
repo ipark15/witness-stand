@@ -10,7 +10,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, status
 from pydantic import BaseModel, Field
 
 from oyez.ai.base import LLMError
@@ -63,11 +63,11 @@ async def request_hint(
     llm: LLMDep,
     body: CoCounselRequest | None = None,
 ) -> CoCounselResponse:
-    if session.complete:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Session is complete — co-counsel cannot be consulted post-verdict.",
-        )
+    # Post-verdict consultations are allowed for the Review page (a private
+    # post-trial conference). The jury penalty is suppressed below because
+    # the verdict is already final and mutating jury_favor would be
+    # semantically incoherent — it's a record, not a live value.
+    post_verdict = session.complete
 
     # Normalize: missing body or whitespace-only draft → no draft.
     draft_raw = body.draft if body is not None else None
@@ -115,8 +115,9 @@ async def request_hint(
     )
     session.transcript.append(hint_msg)
 
-    # Apply the jury-favor penalty centrally.
-    jury_delta = -CO_COUNSEL_JURY_PENALTY
+    # Apply the jury-favor penalty centrally. Suppressed post-verdict so a
+    # review-mode consultation can't mutate a finalized score.
+    jury_delta = 0 if post_verdict else -CO_COUNSEL_JURY_PENALTY
     session.jury_favor = max(0, min(100, session.jury_favor + jury_delta))
 
     await store.update(session)

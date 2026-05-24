@@ -36,6 +36,9 @@ class SessionStore(Protocol):
     async def get(self, session_id: str) -> Session:
         ...
 
+    async def list(self) -> list[Session]:
+        ...
+
     async def update(self, session: Session) -> Session:
         ...
 
@@ -73,6 +76,26 @@ class JsonFileSessionStore(SessionStore):
         if not path.exists():
             raise SessionNotFound(session_id)
         return self._read(path)
+
+    async def list(self) -> list[Session]:
+        """Return every persisted session, freshest first.
+
+        Cheap implementation: iterate the sessions directory and parse each
+        JSON file. Files that fail to parse are skipped with a warning so a
+        single corrupted session can't take the whole listing down.
+        """
+        sessions: list[Session] = []
+        for path in self._root.glob("*.json"):
+            try:
+                sessions.append(self._read(path))
+            except Exception:  # noqa: BLE001 — best-effort listing
+                # We deliberately swallow per-file errors so the listing
+                # remains usable even if one session file is malformed
+                # (e.g. mid-write crash, schema drift). Callers that need
+                # strict reads should use get() per id.
+                continue
+        sessions.sort(key=lambda s: s.updated_at, reverse=True)
+        return sessions
 
     async def update(self, session: Session) -> Session:
         async with await self._lock_for(session.id):
@@ -138,6 +161,12 @@ class InMemorySessionStore(SessionStore):
         if session_id not in self._data:
             raise SessionNotFound(session_id)
         return self._data[session_id].model_copy(deep=True)
+
+    async def list(self) -> list[Session]:
+        # Deep-copy on the way out so callers can't mutate stored state.
+        sessions = [s.model_copy(deep=True) for s in self._data.values()]
+        sessions.sort(key=lambda s: s.updated_at, reverse=True)
+        return sessions
 
     async def update(self, session: Session) -> Session:
         async with await self._lock(session.id):
