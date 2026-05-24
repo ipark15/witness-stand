@@ -26,7 +26,10 @@ def load_fixture(subject: str, topic: str) -> LessonPlanGeneration | None:
     if not path.exists():
         return None
     data = json.loads(path.read_text(encoding="utf-8"))
-    return LessonPlanGeneration.model_validate(data)
+    try:
+        return LessonPlanGeneration.model_validate(data)
+    except Exception:
+        return None
 
 
 def list_fixtures() -> list[str]:
