@@ -92,23 +92,43 @@ const useSessionStore = create((set, get) => ({
   applySectionUpdates: (updates) =>
     set((state) => {
       if (!state.caseFile || !updates || updates.length === 0) return state;
-      const rank = { pending: 0, partial: 1, covered: 2 };
+      const rank = { pending: 0, partial: 1, covered: 2, skipped: 2 };
       const newMatters = state.caseFile.matters.map((matter) => ({
         ...matter,
         children: matter.children.map((node) => {
           const update = updates.find((u) => u.node_id === node.id);
           if (!update) return node;
+          // Don't overwrite skipped with covered/partial
+          if (node.status === 'skipped') return node;
           if ((rank[update.new_status] || 0) > (rank[node.status] || 0)) {
             return { ...node, status: update.new_status };
           }
           return node;
         }),
       }));
-      // Update matter-level status based on children
       const updatedMatters = newMatters.map((matter) => {
-        const allCovered = matter.children.every((c) => c.status === 'covered');
-        const anyPartial = matter.children.some((c) => c.status === 'partial' || c.status === 'covered');
-        const newStatus = allCovered ? 'covered' : anyPartial ? 'partial' : matter.status;
+        const allDone = matter.children.every((c) => c.status === 'covered' || c.status === 'skipped');
+        const anyPartial = matter.children.some((c) => ['partial', 'covered', 'skipped'].includes(c.status));
+        const newStatus = allDone ? 'covered' : anyPartial ? 'partial' : matter.status;
+        return { ...matter, status: newStatus };
+      });
+      return { caseFile: { ...state.caseFile, matters: updatedMatters } };
+    }),
+
+  skipNode: (nodeId) =>
+    set((state) => {
+      if (!state.caseFile) return state;
+      const newMatters = state.caseFile.matters.map((matter) => ({
+        ...matter,
+        children: matter.children.map((node) => {
+          if (node.id !== nodeId) return node;
+          return { ...node, status: 'skipped', revealed_answer: node.answer_key || '' };
+        }),
+      }));
+      const updatedMatters = newMatters.map((matter) => {
+        const allDone = matter.children.every((c) => c.status === 'covered' || c.status === 'skipped');
+        const anyPartial = matter.children.some((c) => ['partial', 'covered', 'skipped'].includes(c.status));
+        const newStatus = allDone ? 'covered' : anyPartial ? 'partial' : matter.status;
         return { ...matter, status: newStatus };
       });
       return { caseFile: { ...state.caseFile, matters: updatedMatters } };
