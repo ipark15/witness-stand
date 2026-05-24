@@ -43,15 +43,6 @@ class ExaminerTurn(BaseModel):
             "student does not see this."
         ),
     )
-    section_updates: list[SectionUpdate] = Field(
-        default_factory=list,
-        description=(
-            "Case file sections addressed by the student's testimony this turn. "
-            "Empty if no sections were meaningfully advanced. The opposition "
-            "reviews the case file answer key and signals when the student's "
-            "explanation covers a node."
-        ),
-    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
