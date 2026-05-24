@@ -100,7 +100,13 @@ function HoldToRevealButton({ nodeId }) {
           style={{ transform: `scaleX(${progress})` }}
         />
       )}
-      <span className="relative">{holding ? 'Hold…' : 'Reveal Answer'}</span>
+      {/* Stack both labels in the same grid cell so the button width is always
+          fixed to the wider label ("Reveal Answer") — prevents the button from
+          shrinking mid-hold and slipping out from under the cursor. */}
+      <span className="relative grid leading-none">
+        <span className={`col-start-1 row-start-1 ${holding ? 'invisible' : ''}`}>Reveal Answer</span>
+        <span className={`col-start-1 row-start-1 ${holding ? '' : 'invisible'}`}>Hold…</span>
+      </span>
     </button>
   );
 }
