@@ -69,7 +69,7 @@ def _apply_section_updates(
         if node is None:
             continue
         # Only move forward: pending→partial→covered, never backwards
-        rank = {"pending": 0, "partial": 1, "covered": 2}
+        rank = {"pending": 0, "partial": 1, "covered": 2, "skipped": 3}
         if rank.get(update.new_status, 0) > rank.get(node.status, 0):
             node.status = update.new_status
 
@@ -78,16 +78,16 @@ def _matter_all_covered(matter: CaseFileNode) -> bool:
     """Check if every leaf node in this matter is covered."""
     if not matter.children:
         return matter.status == "covered"
-    return all(child.status == "covered" for child in matter.children)
+    return all(child.status in ("covered", "skipped") for child in matter.children)
 
 
 def _update_matter_status(matter: CaseFileNode) -> None:
     """Update the branch node status based on its children."""
     if not matter.children:
         return
-    if all(c.status == "covered" for c in matter.children):
+    if all(c.status in ("covered", "skipped") for c in matter.children):
         matter.status = "covered"
-    elif any(c.status in ("partial", "covered") for c in matter.children):
+    elif any(c.status in ("partial", "covered", "skipped") for c in matter.children):
         matter.status = "partial"
 
 
@@ -199,7 +199,7 @@ async def submit_turn(
 
         # Only evaluate if there are uncovered nodes
         has_remaining = any(
-            c.status != "covered" for c in current_matter.children
+            c.status not in ("covered", "skipped") for c in current_matter.children
         )
         if has_remaining:
             eval_system = build_evaluation_system(
