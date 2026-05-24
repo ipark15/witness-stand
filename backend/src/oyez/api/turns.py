@@ -261,47 +261,69 @@ async def submit_turn(
                 # Non-fatal: examination continues without evaluation
 
     # 7. Advance logic — matter is covered OR opposition signals advance.
+    #    Walks forward through *consecutive* fully-resolved matters so that
+    #    skipping several matters in a row collapses into a single judge
+    #    transition (or a single verdict if we exhaust the plan).
     judge_msg: TranscriptMessage | None = None
     advanced = False
     session_complete = False
+    matters_jumped = 0
 
     should_advance = matter_covered or turn.advance
     if should_advance:
-        can_advance_matter = (
-            session.lesson_plan
-            and session.current_matter_index < len(session.lesson_plan.children) - 1
-        )
-        can_advance_subtopic = (
-            session.current_subtopic_index < len(session.subtopics) - 1
-        )
+        while True:
+            can_advance_matter = (
+                session.lesson_plan
+                and session.current_matter_index < len(session.lesson_plan.children) - 1
+            )
+            can_advance_subtopic = (
+                session.current_subtopic_index < len(session.subtopics) - 1
+            )
 
-        if can_advance_matter or can_advance_subtopic:
+            if not (can_advance_matter or can_advance_subtopic):
+                # Plan exhausted — verdict.
+                session.complete = True
+                session.verdict = _verdict_for(session.jury_favor)
+                session_complete = True
+                judge_msg = TranscriptMessage(
+                    id=uuid.uuid4().hex,
+                    speaker="judge",
+                    content=(
+                        "The court has heard sufficient testimony. The verdict: "
+                        f"{session.verdict}."
+                    ),
+                    created_at=datetime.now(timezone.utc),
+                )
+                break
+
+            # Take one step.
             if can_advance_matter:
                 session.current_matter_index += 1
             if can_advance_subtopic:
                 session.current_subtopic_index += 1
             advanced = True
+            matters_jumped += 1
+
+            # If the new current matter is also already fully resolved,
+            # loop to advance again so a run of consecutive skips collapses
+            # into one transition. Otherwise stop here — the student has
+            # work to do on this matter.
+            if not session.lesson_plan:
+                break
+            new_matter = session.lesson_plan.children[
+                min(session.current_matter_index, len(session.lesson_plan.children) - 1)
+            ]
+            if not _matter_all_covered(new_matter):
+                break
+
+        if judge_msg is None and advanced:
             judge_msg = TranscriptMessage(
                 id=uuid.uuid4().hex,
                 speaker="judge",
                 content=random.choice(JUDGE_TRANSITIONS),
                 created_at=datetime.now(timezone.utc),
             )
-            session.transcript.append(judge_msg)
-        else:
-            # Last matter/subtopic concluded — verdict.
-            session.complete = True
-            session.verdict = _verdict_for(session.jury_favor)
-            session_complete = True
-            judge_msg = TranscriptMessage(
-                id=uuid.uuid4().hex,
-                speaker="judge",
-                content=(
-                    "The court has heard sufficient testimony. The verdict: "
-                    f"{session.verdict}."
-                ),
-                created_at=datetime.now(timezone.utc),
-            )
+        if judge_msg is not None:
             session.transcript.append(judge_msg)
 
     await store.update(session)
@@ -309,6 +331,7 @@ async def submit_turn(
     logger.info(
         "turn_complete",
         advanced=advanced,
+        matters_jumped=matters_jumped,
         session_complete=session_complete,
         quality_delta=quality_delta,
         jury_delta=jury_delta,
