@@ -39,7 +39,12 @@ export default function Setup() {
   const [historyError, setHistoryError] = useState(null);
 
   useEffect(() => {
-    if (tab !== 'history' || history !== null || historyLoading) return;
+    // Only fetch when the user is on the history tab and we haven't loaded
+    // it yet. We deliberately exclude `historyLoading` from this guard and
+    // the deps: setting it to true triggers a re-render which would re-run
+    // this effect, cancelling its own in-flight fetch via the cleanup
+    // below and leaving the UI stuck on the loading placeholder.
+    if (tab !== 'history' || history !== null) return;
     setHistoryLoading(true);
     setHistoryError(null);
     let cancelled = false;
@@ -61,7 +66,7 @@ export default function Setup() {
     return () => {
       cancelled = true;
     };
-  }, [tab, history, historyLoading]);
+  }, [tab, history]);
 
   // User study mode
   const [studyMode, setStudyMode] = useState(false);
