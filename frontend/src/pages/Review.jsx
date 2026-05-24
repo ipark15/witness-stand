@@ -4,6 +4,7 @@ import AppHeader from '../components/layout/AppHeader.jsx';
 import MessageBubble from '../components/examination/MessageBubble.jsx';
 import CaseFileView from '../components/examination/CaseFileView.jsx';
 import LoadingDots from '../components/ui/LoadingDots.jsx';
+import useSpeechRecognition from '../hooks/useSpeechRecognition.js';
 
 // Maps a persisted TranscriptMessage.speaker to the shape MessageBubble expects.
 // Defense → user-side bubble. Everyone else is AI-side with a speakerRole tag.
@@ -57,6 +58,7 @@ export default function Review() {
   const [loading, setLoading] = useState(true);
   const [coCounselLoading, setCoCounselLoading] = useState(false);
   const [coCounselError, setCoCounselError] = useState(null);
+  const [question, setQuestion] = useState('');
   const messagesEndRef = useRef(null);
 
   // Load session + case file in parallel. Case file is optional — older
@@ -100,30 +102,66 @@ export default function Review() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length]);
 
-  const handleCoCounsel = useCallback(async () => {
-    if (coCounselLoading || !sessionId) return;
+  // Dictation: append final transcript chunks to the question textarea,
+  // preserving anything the user already typed.
+  const onTranscript = useCallback((text) => {
+    setQuestion((prev) => {
+      const needsSpace = prev.length > 0 && !prev.endsWith(' ');
+      return prev + (needsSpace ? ' ' : '') + text.trim();
+    });
+  }, []);
+
+  const {
+    listening,
+    supported: speechSupported,
+    error: speechError,
+    toggle: toggleDictation,
+  } = useSpeechRecognition({ onTranscript });
+
+  const handleAsk = useCallback(async () => {
+    const trimmed = question.trim();
+    if (!trimmed || coCounselLoading || !sessionId) return;
     setCoCounselLoading(true);
     setCoCounselError(null);
+    // Optimistically append the user's question so the UI feels responsive
+    // while we wait for the LLM. We tag it with a tentative id which the
+    // backend's persisted TranscriptMessage will replace once the answer
+    // arrives.
+    const optimisticQuestionId = `pending-${Date.now()}`;
+    setMessages((prev) => [
+      ...prev,
+      { id: optimisticQuestionId, role: 'user', content: trimmed },
+    ]);
+    setQuestion('');
     try {
-      const res = await fetch(`/api/sessions/${sessionId}/co-counsel`, {
+      const res = await fetch(`/api/sessions/${sessionId}/post-trial-confer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ draft: null }),
+        body: JSON.stringify({ question: trimmed }),
       });
       if (!res.ok) {
         const detail = await res.json().catch(() => ({}));
         throw new Error(detail.detail || `HTTP ${res.status}`);
       }
       const data = await res.json();
-      // The backend returns the persisted TranscriptMessage; project it.
-      setMessages((prev) => [...prev, transcriptToBubble(data.hint)]);
+      // Replace the optimistic question with the persisted one and append
+      // the answer. Two messages, same shape the transcript uses elsewhere.
+      setMessages((prev) => [
+        ...prev.filter((m) => m.id !== optimisticQuestionId),
+        transcriptToBubble(data.question),
+        transcriptToBubble(data.answer),
+      ]);
     } catch (err) {
-      console.error('Co-counsel failed:', err);
+      console.error('Post-trial co-counsel failed:', err);
       setCoCounselError(err.message || 'Co-counsel unavailable');
+      // Drop the optimistic bubble on failure so the user can retry.
+      setMessages((prev) => prev.filter((m) => m.id !== optimisticQuestionId));
+      // Restore the question so the user doesn't lose what they typed.
+      setQuestion(trimmed);
     } finally {
       setCoCounselLoading(false);
     }
-  }, [coCounselLoading, sessionId]);
+  }, [question, coCounselLoading, sessionId]);
 
   // ─────────────────────────────────────────────────────────────────────
   // Render
@@ -248,24 +286,78 @@ export default function Review() {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Footer: co-counsel only — no testimony input in review mode */}
-          <div className="border-t border-ink/10 bg-white/30 px-8 py-3 shrink-0 flex items-center justify-between gap-4">
-            <div className="font-sans text-[11px] text-ink/40 italic">
-              The court has adjourned. You may still confer with co-counsel privately.
-            </div>
-            <div className="flex items-center gap-3 shrink-0">
+          {/* Footer: post-trial chat with co-counsel. No examiner input —
+              the trial is over, this is a private debrief Q&A. */}
+          <div className="border-t border-ink/10 bg-white/30 px-8 py-3 shrink-0">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="font-sans text-xs text-ink/40">
+                Post-trial conference with co-counsel
+              </span>
               {coCounselError && (
                 <span className="font-sans text-[11px] text-crimson/80">{coCounselError}</span>
               )}
+            </div>
+            <div className="flex items-end gap-2">
+              <div className="flex-1 relative">
+                <textarea
+                  value={question}
+                  onChange={(e) => setQuestion(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleAsk();
+                    }
+                  }}
+                  rows={2}
+                  disabled={coCounselLoading}
+                  placeholder={
+                    listening
+                      ? 'Listening — speak your question…'
+                      : 'Ask co-counsel about this case… (Shift+Enter for new line)'
+                  }
+                  className={`w-full border bg-white/60 rounded-lg px-3 py-2 pr-11 font-serif text-ink text-[14px] placeholder:text-ink/25 focus:outline-none focus:ring-1 resize-none transition disabled:opacity-60 ${
+                    listening
+                      ? 'border-crimson/50 focus:border-crimson focus:ring-crimson/30'
+                      : 'border-ink/20 focus:border-emerald-700/40 focus:ring-emerald-700/20'
+                  }`}
+                />
+                {speechSupported && (
+                  <button
+                    type="button"
+                    onClick={toggleDictation}
+                    disabled={coCounselLoading}
+                    title={speechError || (listening ? 'Stop dictation' : 'Start dictation')}
+                    className={`absolute right-2 bottom-2 p-1.5 rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                      listening
+                        ? 'bg-crimson/10 text-crimson hover:bg-crimson/20 animate-pulse'
+                        : 'text-ink/30 hover:text-ink/60 hover:bg-ink/5'
+                    }`}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+                      {listening ? (
+                        /* Stop icon (filled square) */
+                        <rect x="6" y="6" width="12" height="12" rx="2" />
+                      ) : (
+                        /* Microphone icon */
+                        <path d="M12 1a4 4 0 0 0-4 4v6a4 4 0 0 0 8 0V5a4 4 0 0 0-4-4Zm7 10a1 1 0 1 0-2 0 5 5 0 0 1-10 0 1 1 0 1 0-2 0 7 7 0 0 0 6 6.93V21H8a1 1 0 1 0 0 2h8a1 1 0 1 0 0-2h-3v-3.07A7 7 0 0 0 19 11Z" />
+                      )}
+                    </svg>
+                  </button>
+                )}
+              </div>
               <button
-                onClick={handleCoCounsel}
-                disabled={coCounselLoading}
-                title="Ask co-counsel for a private nudge on this case"
-                className="font-sans text-xs text-emerald-700 border border-emerald-700/30 px-3 py-1.5 rounded-md hover:bg-emerald-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                onClick={handleAsk}
+                disabled={!question.trim() || coCounselLoading}
+                className="font-sans text-xs text-parchment bg-emerald-700 border border-emerald-700 px-4 py-2 rounded-md hover:bg-emerald-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors self-end"
               >
-                {coCounselLoading ? 'Consulting…' : '⚑ Confer with Co-Counsel'}
+                {coCounselLoading ? 'Asking…' : 'Ask'}
               </button>
             </div>
+            {speechError && (
+              <p className="mt-1 font-sans text-[11px] text-crimson/80 leading-snug">
+                {speechError}
+              </p>
+            )}
           </div>
         </main>
 
