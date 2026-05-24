@@ -27,10 +27,21 @@ Request format (llm_request_{id}.json):
   }
 
 Response format (llm_response_{id}.json):
-  {
-    "id": "<must match request id>",
-    "content": "<text response OR JSON string for structured>"
-  }
+  The response file is whatever you want the LLM to "say". The provider
+  accepts three shapes, in this order of preference:
+
+    1. Wrapped:   {"content": "<text or stringified JSON>", "id": "..."}
+                  Original format. ``id`` is optional (filename already
+                  scopes the exchange) but if present must match.
+    2. Structured raw:  {"some_key": "...", ...}
+                  Any other JSON object — the file body IS the structured
+                  response. Useful for ``structured_chat`` calls where
+                  you'd otherwise have to JSON-encode-as-a-string-inside-
+                  a-JSON-object. Just write the schema-conforming object.
+    3. Plain text:  Anything that isn't JSON.
+                  The file body IS the textual response. Useful for
+                  ``chat``/``text`` calls where escaping quotes and
+                  newlines in a JSON wrapper is tedious.
 """
 from __future__ import annotations
 
@@ -98,25 +109,60 @@ class FileLLM:
             if resp_path.exists():
                 try:
                     raw = resp_path.read_text(encoding="utf-8")
-                    response = json.loads(raw)
-                except (json.JSONDecodeError, OSError) as e:
-                    logger.warning("file_llm_response_parse_error", error=str(e))
+                except OSError as e:
+                    logger.warning("file_llm_response_read_error", error=str(e))
                     continue
 
-                # Validate ID matches
-                if response.get("id") != request_id:
-                    logger.warning(
-                        "file_llm_id_mismatch",
-                        expected=request_id,
-                        got=response.get("id"),
-                    )
-                    continue
+                # Resolve the content. Three shapes are accepted (see the
+                # module docstring): wrapped {"content": ...}, a raw
+                # structured object, or plain text. We prefer the wrapper
+                # when present because it lets callers smuggle the id
+                # safety check, but everything else falls back to the
+                # file body verbatim so manual workflows aren't forced
+                # to JSON-escape their text.
+                try:
+                    parsed = json.loads(raw)
+                except json.JSONDecodeError:
+                    parsed = None
+
+                if isinstance(parsed, dict) and "content" in parsed:
+                    inner_id = parsed.get("id")
+                    if inner_id is not None and inner_id != request_id:
+                        # Stale response from a different exchange leaked
+                        # into this path — wait for the real one.
+                        logger.warning(
+                            "file_llm_id_mismatch",
+                            expected=request_id,
+                            got=inner_id,
+                        )
+                        continue
+                    content = parsed["content"]
+                    # Tolerate one accidental round of double-wrapping
+                    # (a common copy-paste mistake): if the unwrapped
+                    # content is itself a wrapper, peel once and log.
+                    if isinstance(content, str):
+                        try:
+                            inner = json.loads(content)
+                        except (json.JSONDecodeError, TypeError):
+                            inner = None
+                        if isinstance(inner, dict) and "content" in inner and isinstance(inner["content"], str):
+                            logger.warning(
+                                "file_llm_double_wrap_unwrapped",
+                                request_id=request_id,
+                            )
+                            content = inner["content"]
+                else:
+                    # No wrapper — file body IS the response. Either a
+                    # raw structured object (downstream _parse will load
+                    # it again) or plain text. Strip trailing whitespace
+                    # so a final newline doesn't break strict JSON
+                    # consumers.
+                    content = raw.strip()
 
                 # Cleanup
                 req_path.unlink(missing_ok=True)
                 resp_path.unlink(missing_ok=True)
 
-                content = response.get("content", "")
                 logger.info(
                     "file_llm_response_received",
                     request_id=request_id,
