@@ -70,9 +70,11 @@ CO_COUNSEL_FALLBACK_HINT: Final[str] = (
     "before generalizing."
 )
 
-# Co-counsel use carries a jury-favor penalty. Centralized so the frontend
-# and backend agree.
-CO_COUNSEL_JURY_PENALTY: Final[int] = 5
+# Co-counsel use is free — no jury-favor penalty. We keep the constant
+# (rather than ripping out the wiring) so the cost is easy to re-introduce
+# if pedagogy calls for it. The wire response still reports jury_delta /
+# jury_favor; with the penalty at 0 those values just don't change.
+CO_COUNSEL_JURY_PENALTY: Final[int] = 0
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Scoring bounds
