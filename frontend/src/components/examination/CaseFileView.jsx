@@ -144,7 +144,7 @@ function MatterCard({ matter, isCurrent, index }) {
   );
 }
 
-export default function CaseFileView({ caseFile, evaluationFeedback, currentSubtopicIndex }) {
+export default function CaseFileView({ caseFile, evaluationFeedback, currentSubtopicIndex, compact }) {
   if (!caseFile) {
     return (
       <div className="flex-1 overflow-y-auto p-8 flex items-center justify-center">
@@ -169,21 +169,23 @@ export default function CaseFileView({ caseFile, evaluationFeedback, currentSubt
     0
   );
 
+  const padding = compact ? 'p-4' : 'p-8';
+
   return (
-    <div className="flex-1 overflow-y-auto p-8">
+    <div className={`flex-1 overflow-y-auto ${padding}`}>
       <div className="flex items-start justify-between mb-1">
-        <h2 className="font-serif text-2xl text-ink">Case File</h2>
-        <div className="flex items-center gap-3 font-sans text-xs text-ink/50">
+        <h2 className={`font-serif text-ink ${compact ? 'text-lg' : 'text-2xl'}`}>Case File</h2>
+        <div className={`flex items-center gap-2 font-sans text-ink/50 ${compact ? 'text-[10px]' : 'text-xs'}`}>
           <span className="text-green-600 font-semibold">{coveredNodes} covered</span>
           {partialNodes > 0 && <span className="text-gold font-semibold">{partialNodes} partial</span>}
           <span className="text-ink/30">{totalNodes - coveredNodes - partialNodes} remaining</span>
         </div>
       </div>
-      <p className="font-sans text-xs text-ink/40 mb-6 uppercase tracking-widest">
+      <p className={`font-sans text-ink/40 mb-4 uppercase tracking-widest ${compact ? 'text-[10px]' : 'text-xs mb-6'}`}>
         {caseFile.topic} — Examination Agenda
       </p>
 
-      <div className="space-y-3">
+      <div className="space-y-2">
         {caseFile.matters.map((matter, i) => (
           <MatterCard
             key={matter.id}
@@ -195,9 +197,9 @@ export default function CaseFileView({ caseFile, evaluationFeedback, currentSubt
       </div>
 
       {evaluationFeedback && (
-        <div className="mt-6 border border-gold/30 bg-gold/5 rounded-xl px-5 py-4">
-          <SectionHeading className="mb-2">Evaluator Feedback</SectionHeading>
-          <p className="font-serif text-sm text-ink/70 leading-relaxed italic">
+        <div className={`mt-4 border border-gold/30 bg-gold/5 rounded-xl ${compact ? 'px-3 py-2.5' : 'px-5 py-4 mt-6'}`}>
+          <SectionHeading className="mb-1">Evaluator Feedback</SectionHeading>
+          <p className={`font-serif text-ink/70 leading-relaxed italic ${compact ? 'text-xs' : 'text-sm'}`}>
             {evaluationFeedback}
           </p>
         </div>
