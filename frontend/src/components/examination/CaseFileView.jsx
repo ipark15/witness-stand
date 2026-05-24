@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import useSessionStore from '../../store/sessionStore.js';
 import SectionHeading from '../ui/SectionHeading.jsx';
 
 const CATEGORY_STYLES = {
@@ -14,7 +15,10 @@ const STATUS_CONFIG = {
   pending: { icon: '○', color: 'text-ink/25', label: 'Pending' },
   partial: { icon: '◐', color: 'text-gold', label: 'Partial' },
   covered: { icon: '✓', color: 'text-green-600', label: 'Covered' },
+  skipped: { icon: '⊘', color: 'text-ink/35', label: 'Skipped' },
 };
+
+const HOLD_DURATION_MS = 2000;
 
 function StatusDots({ children }) {
   return (
@@ -42,14 +46,76 @@ function CategoryBadge({ category }) {
   );
 }
 
+function HoldToRevealButton({ nodeId }) {
+  const [holding, setHolding] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const timerRef = useRef(null);
+  const startRef = useRef(null);
+  const frameRef = useRef(null);
+  const store = useSessionStore;
+
+  const tick = useCallback(() => {
+    if (!startRef.current) return;
+    const elapsed = Date.now() - startRef.current;
+    const pct = Math.min(elapsed / HOLD_DURATION_MS, 1);
+    setProgress(pct);
+    if (pct >= 1) {
+      store.getState().skipNode(nodeId);
+      cancel();
+      return;
+    }
+    frameRef.current = requestAnimationFrame(tick);
+  }, [nodeId]);
+
+  const cancel = useCallback(() => {
+    setHolding(false);
+    setProgress(0);
+    startRef.current = null;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    if (frameRef.current) cancelAnimationFrame(frameRef.current);
+  }, []);
+
+  const begin = useCallback(() => {
+    if (startRef.current) return;
+    setHolding(true);
+    startRef.current = Date.now();
+    frameRef.current = requestAnimationFrame(tick);
+  }, [tick]);
+
+  useEffect(() => () => cancel(), [cancel]);
+
+  return (
+    <button
+      onMouseDown={begin}
+      onMouseUp={cancel}
+      onMouseLeave={cancel}
+      onTouchStart={begin}
+      onTouchEnd={cancel}
+      className="relative mt-1.5 font-sans text-[10px] px-2 py-1 rounded border border-ink/15 text-ink/40 hover:text-ink/60 hover:border-ink/25 transition-colors overflow-hidden select-none"
+      title="Hold for 2 seconds to reveal the answer (marks as skipped)"
+    >
+      {holding && (
+        <span
+          className="absolute inset-0 bg-crimson/10 origin-left transition-none"
+          style={{ transform: `scaleX(${progress})` }}
+        />
+      )}
+      <span className="relative">{holding ? 'Hold…' : 'Reveal Answer'}</span>
+    </button>
+  );
+}
+
 function NodeRow({ node }) {
   const statusCfg = STATUS_CONFIG[node.status] || STATUS_CONFIG.pending;
   const isCovered = node.status === 'covered';
+  const isSkipped = node.status === 'skipped';
+  const isDone = isCovered || isSkipped;
+  const canReveal = !isDone && node.answer_key;
 
   return (
     <div
       className={`flex items-start gap-3 py-2.5 px-3 rounded-lg transition-colors ${
-        isCovered ? 'bg-green-50/40' : ''
+        isCovered ? 'bg-green-50/40' : isSkipped ? 'bg-ink/[0.03]' : ''
       }`}
     >
       <span className={`text-lg mt-0.5 shrink-0 ${statusCfg.color}`}>{statusCfg.icon}</span>
@@ -57,16 +123,29 @@ function NodeRow({ node }) {
         <div className="flex items-center gap-2 flex-wrap">
           {node.category && <CategoryBadge category={node.category} />}
           <span
-            className={`font-serif text-sm ${isCovered ? 'text-ink/50 line-through' : 'text-ink'}`}
+            className={`font-serif text-sm ${
+              isSkipped ? 'text-ink/40 line-through' : isCovered ? 'text-ink/50 line-through' : 'text-ink'
+            }`}
           >
             {node.label}
           </span>
+          {isSkipped && (
+            <span className="font-sans text-[9px] px-1.5 py-0.5 rounded bg-ink/5 text-ink/30 uppercase tracking-wider">
+              skipped
+            </span>
+          )}
         </div>
         {node.prompt_hint && (
-          <p className={`font-sans text-xs mt-1 leading-relaxed ${isCovered ? 'text-ink/30' : 'text-ink/50'} italic`}>
+          <p className={`font-sans text-xs mt-1 leading-relaxed ${isDone ? 'text-ink/30' : 'text-ink/50'} italic`}>
             {node.prompt_hint}
           </p>
         )}
+        {isSkipped && node.revealed_answer && (
+          <div className="mt-1.5 font-sans text-xs text-ink/50 bg-ink/[0.03] border border-ink/8 rounded px-2 py-1.5 leading-relaxed">
+            {node.revealed_answer}
+          </div>
+        )}
+        {canReveal && <HoldToRevealButton nodeId={node.id} />}
       </div>
     </div>
   );
@@ -75,7 +154,8 @@ function NodeRow({ node }) {
 function MatterCard({ matter, isCurrent, index }) {
   const [expanded, setExpanded] = useState(isCurrent);
   useEffect(() => { if (isCurrent) setExpanded(true); }, [isCurrent]);
-  const allCovered = matter.children.every((c) => c.status === 'covered');
+  const allDone = matter.children.every((c) => c.status === 'covered' || c.status === 'skipped');
+  const allCovered = allDone && matter.children.every((c) => c.status === 'covered');
   const anyProgress = matter.children.some((c) => c.status !== 'pending');
 
   const borderColor = allCovered
@@ -168,6 +248,11 @@ export default function CaseFileView({ caseFile, evaluationFeedback, currentSubt
     (sum, m) => sum + m.children.filter((c) => c.status === 'partial').length,
     0
   );
+  const skippedNodes = caseFile.matters.reduce(
+    (sum, m) => sum + m.children.filter((c) => c.status === 'skipped').length,
+    0
+  );
+  const remaining = totalNodes - coveredNodes - partialNodes - skippedNodes;
 
   const padding = compact ? 'p-4' : 'p-8';
 
@@ -177,8 +262,9 @@ export default function CaseFileView({ caseFile, evaluationFeedback, currentSubt
         <h2 className={`font-serif text-ink ${compact ? 'text-lg' : 'text-2xl'}`}>Case File</h2>
         <div className={`flex items-center gap-2 font-sans text-ink/50 ${compact ? 'text-[10px]' : 'text-xs'}`}>
           <span className="text-green-600 font-semibold">{coveredNodes} covered</span>
+          {skippedNodes > 0 && <span className="text-ink/35 font-semibold">{skippedNodes} skipped</span>}
           {partialNodes > 0 && <span className="text-gold font-semibold">{partialNodes} partial</span>}
-          <span className="text-ink/30">{totalNodes - coveredNodes - partialNodes} remaining</span>
+          <span className="text-ink/30">{remaining} remaining</span>
         </div>
       </div>
       <p className={`font-sans text-ink/40 uppercase tracking-widest ${compact ? 'text-[10px] mb-4' : 'text-xs mb-6'}`}>

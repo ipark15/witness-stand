@@ -6,7 +6,7 @@ function CurrentMatterHints({ caseFile, currentSubtopicIndex }) {
   if (!caseFile) return null;
   const matter = caseFile.matters[currentSubtopicIndex];
   if (!matter) return null;
-  const remaining = matter.children.filter((n) => n.status !== 'covered');
+  const remaining = matter.children.filter((n) => n.status !== 'covered' && n.status !== 'skipped');
   if (remaining.length === 0) return null;
 
   return (
