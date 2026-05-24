@@ -1,2 +1,9 @@
+# Single-package "workspace". The `packages` field is required by pnpm 9+.
+# Keeping the file (rather than deleting it) preserves `allowBuilds` for
+# pnpm 10's tightened install-script policy: esbuild ships a native binary
+# via a post-install script, which pnpm 10 blocks unless whitelisted here.
+packages:
+  - "."
+
 allowBuilds:
   esbuild: true
