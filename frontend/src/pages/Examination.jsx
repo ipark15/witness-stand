@@ -259,7 +259,7 @@ export default function Examination() {
       {/* Header */}
       <header className="bg-navy px-6 py-3 flex items-center justify-between shrink-0 shadow">
         <div className="flex items-center gap-4">
-          <h1 className="text-gold font-serif text-lg tracking-widest">THE WITNESS STAND</h1>
+          <h1 className="text-gold font-serif text-lg tracking-widest">OYEZ</h1>
           <span className="text-parchment/25">|</span>
           <span className="font-sans text-xs text-parchment/45 uppercase tracking-widest">
             {intensity} Examination

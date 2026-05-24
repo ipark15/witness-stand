@@ -1,4 +1,4 @@
-# Witness Stand — User Study Guide
+# Oyez — User Study Guide
 
 This guide explains how to run a user study session using **pre-constructed
 lesson plans** instead of the built-in Gemma AI generation. This lets you
@@ -24,7 +24,7 @@ directly.
 ## Option A: UI Toggle (Recommended)
 
 1. **Generate a lesson plan with ChatGPT** (see [Generating with ChatGPT](#generating-a-lesson-plan-with-chatgpt) below).
-2. Open Witness Stand in your browser and go to the Setup page.
+2. Open Oyez in your browser and go to the Setup page.
 3. In the right column, click **User Study Mode** to toggle it ON.
 4. Paste the JSON into the textarea that appears.
 5. The validator will show "Valid JSON" if the format is correct.

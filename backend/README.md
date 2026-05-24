@@ -1,8 +1,8 @@
-# Witness Stand — Backend
+# Oyez — Backend
 
 FastAPI service that powers the courtroom-style academic cross-examination
 app. All LLM calls go through a single provider-agnostic interface
-(`src/witness_stand/ai/base.py`); the current implementation is **Gemma 4**
+(`src/oyez/ai/base.py`); the current implementation is **Gemma 4**
 via Google's `google-genai` SDK.
 
 ---
@@ -13,7 +13,7 @@ via Google's `google-genai` SDK.
 cd backend
 cp .env.example .env        # fill in GOOGLE_API_KEY
 uv sync                      # creates .venv, installs locked deps
-uv run fastapi dev src/witness_stand/main.py
+uv run fastapi dev src/oyez/main.py
 ```
 
 Server listens on `http://localhost:8000` by default. The Vite frontend
@@ -55,7 +55,7 @@ FastAPI (:8000)
    └── /api/sessions/{id}/co-counsel   private hint with jury penalty
                   │
                   ▼
-           LLM Protocol (src/witness_stand/ai/base.py)
+           LLM Protocol (src/oyez/ai/base.py)
                   │
                   ▼
            GemmaLLM via google-genai
@@ -97,7 +97,7 @@ produced the message:
 ### Prompt layout
 
 Persona instructions are editable text under `backend/prompts/*.md`.
-Per-call composition is in `src/witness_stand/ai/prompts/`. State that's
+Per-call composition is in `src/oyez/ai/prompts/`. State that's
 stable for a session (subject/topic/intensity) lives in the system
 instruction; per-turn mutable state (current subtopic, jury favor) is
 prepended to the latest user message so the system instruction stays
@@ -105,7 +105,7 @@ identical across calls and the prefix stays cacheable.
 
 ### Logging
 
-Loguru via `src/witness_stand/logging_setup.py`. The HTTP middleware
+Loguru via `src/oyez/logging_setup.py`. The HTTP middleware
 binds a `request_id` (and `session_id` when present in the URL) onto
 every log line emitted during a request. LLM calls log model, duration,
 and token counts.
@@ -129,6 +129,6 @@ backend prunes it on read and surfaces `files_expired: true` in
 ## Adding a new provider
 
 1. Add the SDK to `pyproject.toml` via `uv add`.
-2. Create `src/witness_stand/ai/<name>.py` implementing the `LLM`
+2. Create `src/oyez/ai/<name>.py` implementing the `LLM`
    Protocol (eight methods).
-3. Wire it into `_build_llm()` in `src/witness_stand/main.py`.
+3. Wire it into `_build_llm()` in `src/oyez/main.py`.
