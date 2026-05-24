@@ -51,9 +51,15 @@ export default function Examination() {
     } catch (err) {
       console.warn('Failed to load opening transcript:', err);
     }
+    // Build opening with current matter context if available
+    const cf = useSessionStore.getState().caseFile;
+    const firstMatter = cf?.matters?.[0];
+    const opening = firstMatter
+      ? `Court is now in session. We will begin with: **${firstMatter.label}**. Counsel, please present your understanding.`
+      : 'Court is now in session. Counsel, please state your understanding of the subject matter at hand.';
     store.addMessage({
       role: 'ai',
-      content: 'Court is now in session. Counsel, please state your understanding of the subject matter at hand.',
+      content: opening,
       speakerRole: 'judge',
     });
   }, [sessionId]);
@@ -80,6 +86,7 @@ export default function Examination() {
         if (planRes.ok) {
           const plan = await planRes.json();
           store.setCaseFile(plan);
+          store.setView('casefile'); // Auto-show case file sidebar
           const matterNames = plan.matters.map((m) => m.label);
           store.initSubtopics(matterNames);
           gotSubtopics = true;
@@ -173,6 +180,16 @@ export default function Examination() {
         });
         if (data.advanced_subtopic) {
           store.nextSubtopic();
+          // Announce the next matter to give student context
+          const state = useSessionStore.getState();
+          const nextMatter = state.caseFile?.matters?.[state.currentSubtopicIndex];
+          if (nextMatter) {
+            store.addMessage({
+              role: 'ai',
+              content: `We now turn to: **${nextMatter.label}**. Counsel, please proceed.`,
+              speakerRole: 'judge',
+            });
+          }
         }
       }
 
@@ -246,21 +263,16 @@ export default function Examination() {
           </span>
         </div>
 
-        <div className="flex border border-gold/25 rounded-lg overflow-hidden">
-          {['examination', 'casefile'].map((v) => (
-            <button
-              key={v}
-              onClick={() => store.setView(v)}
-              className={`px-4 py-1.5 font-sans text-xs tracking-wide transition-colors ${
-                view === v
-                  ? 'bg-gold text-navy font-semibold'
-                  : 'text-parchment/50 hover:text-parchment/80'
-              }`}
-            >
-              {v === 'examination' ? 'Examination' : 'Case File'}
-            </button>
-          ))}
-        </div>
+        <button
+          onClick={() => store.setView(view === 'casefile' ? 'examination' : 'casefile')}
+          className={`px-4 py-1.5 font-sans text-xs tracking-wide border rounded-lg transition-colors ${
+            view === 'casefile'
+              ? 'bg-gold text-navy font-semibold border-gold'
+              : 'text-parchment/50 hover:text-parchment/80 border-gold/25'
+          }`}
+        >
+          {view === 'casefile' ? 'Hide Case File' : 'Show Case File'}
+        </button>
       </header>
 
       <SubtopicProgress
@@ -276,54 +288,59 @@ export default function Examination() {
           currentSubtopicIndex={currentSubtopicIndex}
         />
 
-        <main className="flex-1 flex flex-col overflow-hidden">
-          {view === 'examination' ? (
-            <>
-              {/* Messages */}
-              <div className="flex-1 overflow-y-auto px-8 py-5 space-y-5">
-                {messages.length === 0 && !loading && (
-                  <div className="flex items-center justify-center h-full">
-                    <div className="text-center">
-                      <div className="text-4xl mb-3">⚖️</div>
-                      <p className="font-serif text-ink/40 italic">Summoning the examiner…</p>
-                    </div>
-                  </div>
-                )}
-
-                {messages.map((msg) => (
-                  <MessageBubble key={msg.id} msg={msg} />
-                ))}
-
-                {loading && (
-                  <div className="flex justify-start">
-                    <div className="bg-ink/5 border border-ink/10 rounded-xl px-4 py-3">
-                      <LoadingDots />
-                    </div>
-                  </div>
-                )}
-
-                <div ref={messagesEndRef} />
+        {/* Main chat area */}
+        <main className="flex-1 flex flex-col overflow-hidden min-w-0">
+          {/* Messages */}
+          <div className="flex-1 overflow-y-auto px-8 py-5 space-y-5">
+            {messages.length === 0 && !loading && (
+              <div className="flex items-center justify-center h-full">
+                <div className="text-center">
+                  <div className="text-4xl mb-3">⚖️</div>
+                  <p className="font-serif text-ink/40 italic">Summoning the examiner…</p>
+                </div>
               </div>
+            )}
 
-              <TestimonyInput
-                input={input}
-                setInput={setInput}
-                loading={loading}
-                coCounselLoading={coCounselLoading}
-                exchangeCount={exchangeCount}
-                currentSubtopic={currentSubtopic}
-                onSubmit={handleSubmit}
-                onCoCounsel={handleCoCounsel}
-              />
-            </>
-          ) : (
+            {messages.map((msg) => (
+              <MessageBubble key={msg.id} msg={msg} />
+            ))}
+
+            {loading && (
+              <div className="flex justify-start">
+                <div className="bg-ink/5 border border-ink/10 rounded-xl px-4 py-3">
+                  <LoadingDots />
+                </div>
+              </div>
+            )}
+
+            <div ref={messagesEndRef} />
+          </div>
+
+          <TestimonyInput
+            input={input}
+            setInput={setInput}
+            loading={loading}
+            coCounselLoading={coCounselLoading}
+            exchangeCount={exchangeCount}
+            currentSubtopic={currentSubtopic}
+            caseFile={caseFile}
+            currentSubtopicIndex={currentSubtopicIndex}
+            onSubmit={handleSubmit}
+            onCoCounsel={handleCoCounsel}
+          />
+        </main>
+
+        {/* Case File sidebar — always visible when toggled */}
+        {view === 'casefile' && (
+          <aside className="w-80 shrink-0 border-l border-ink/10 bg-white/20 overflow-hidden flex flex-col">
             <CaseFileView
               caseFile={caseFile}
               evaluationFeedback={evaluationFeedback}
               currentSubtopicIndex={currentSubtopicIndex}
+              compact
             />
-          )}
-        </main>
+          </aside>
+        )}
       </div>
     </div>
   );
