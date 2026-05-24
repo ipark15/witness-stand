@@ -194,3 +194,27 @@ async def get_lesson_plan(session: SessionDep) -> LessonPlanResponse:
             detail="No lesson plan has been generated for this session yet.",
         )
     return _plan_to_response(session.lesson_plan)
+
+
+@router.put("/custom", response_model=LessonPlanResponse, status_code=status.HTTP_200_OK)
+async def load_custom_lesson_plan(
+    body: LessonPlanGeneration,
+    session: SessionDep,
+    store: SessionStoreDep,
+) -> LessonPlanResponse:
+    """Accept a custom lesson plan JSON (e.g. from ChatGPT) and apply it.
+
+    Used in user-study mode so the facilitator can paste a pre-generated
+    lesson plan without needing env vars or fixture files.
+    """
+    plan = _generation_to_plan(body)
+    session.lesson_plan = plan
+    session.subtopics = [
+        SubtopicProgress(name=matter.label)
+        for matter in plan.children
+    ]
+    session.current_matter_index = 0
+    session.current_subtopic_index = 0
+    await store.update(session)
+    logger.info("lesson_plan_custom_loaded", session_id=session.id)
+    return _plan_to_response(plan)
