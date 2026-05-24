@@ -158,7 +158,13 @@ const useSessionStore = create((set, get) => ({
       return { caseFile: { ...state.caseFile, matters: updatedMatters } };
     }),
 
-  skipNode: (nodeId) =>
+  // Mark a leaf node as skipped. We update local state optimistically so
+  // the UI feels instant, then POST to the backend so the skip is durable
+  // and visible to the next turn's evaluator. If the server returns a
+  // newer plan (e.g. a roll-up status we got wrong), we replace caseFile
+  // with the authoritative version.
+  skipNode: async (nodeId) => {
+    // 1. Optimistic local update.
     set((state) => {
       if (!state.caseFile) return state;
       const newMatters = state.caseFile.matters.map((matter) => ({
@@ -176,7 +182,53 @@ const useSessionStore = create((set, get) => ({
         return { ...matter, status: newStatus };
       });
       return { caseFile: { ...state.caseFile, matters: updatedMatters } };
-    }),
+    });
+
+    // 2. Persist to the server. Without this, the backend's lesson_plan
+    //    stays at the pre-skip state and the next turn's evaluator wastes
+    //    an LLM call on a matter the student has already given up on.
+    const sessionId = get().sessionId;
+    if (!sessionId) return;
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/lesson-plan/skip`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ node_id: nodeId }),
+      });
+      if (!res.ok) {
+        console.warn(`skipNode persist failed: HTTP ${res.status}`);
+        return;
+      }
+      const serverPlan = await res.json();
+      // 3. Reconcile: replace caseFile with the server's authoritative
+      //    version, but preserve the locally-set revealed_answer (the
+      //    server doesn't carry that field — it's a frontend-only display
+      //    aid derived from answer_key at skip time).
+      set((state) => {
+        if (!state.caseFile) return { caseFile: serverPlan };
+        const revealedById = new Map();
+        for (const matter of state.caseFile.matters) {
+          for (const node of matter.children) {
+            if (node.revealed_answer) revealedById.set(node.id, node.revealed_answer);
+          }
+        }
+        const merged = {
+          ...serverPlan,
+          matters: serverPlan.matters.map((m) => ({
+            ...m,
+            children: m.children.map((n) =>
+              revealedById.has(n.id)
+                ? { ...n, revealed_answer: revealedById.get(n.id) }
+                : n,
+            ),
+          })),
+        };
+        return { caseFile: merged };
+      });
+    } catch (err) {
+      console.warn('skipNode persist failed:', err);
+    }
+  },
 
   setView: (view) => set({ view }),
 

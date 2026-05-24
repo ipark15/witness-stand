@@ -7,6 +7,7 @@ demos and user studies where token budget matters).
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, status
+from pydantic import BaseModel, Field
 
 from oyez.ai.base import LLMError
 from oyez.ai.prompts.lesson_plan import (
@@ -193,6 +194,72 @@ async def get_lesson_plan(session: SessionDep) -> LessonPlanResponse:
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No lesson plan has been generated for this session yet.",
         )
+    return _plan_to_response(session.lesson_plan)
+
+
+class SkipNodeRequest(BaseModel):
+    """POST /api/sessions/{id}/lesson-plan/skip body."""
+
+    node_id: str = Field(min_length=1, description="The leaf node to mark as skipped.")
+
+
+@router.post("/skip", response_model=LessonPlanResponse, status_code=status.HTTP_200_OK)
+async def skip_node(
+    body: SkipNodeRequest,
+    session: SessionDep,
+    store: SessionStoreDep,
+) -> LessonPlanResponse:
+    """Mark a leaf node as skipped and roll up the parent matter status.
+
+    The frontend's Hold-to-Reveal button calls this so the skip is durable
+    across reloads and visible to the next turn's evaluator (without
+    persistence the backend's lesson_plan stays at the pre-skip state and
+    the evaluator wastes an LLM call on a matter the student already gave
+    up on).
+
+    Idempotent: skipping an already-skipped node is a no-op; a covered
+    node is left alone (we never downgrade — see _apply_section_updates).
+    """
+    if session.lesson_plan is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No lesson plan has been generated for this session yet.",
+        )
+
+    target_node: CaseFileNode | None = None
+    target_matter: CaseFileNode | None = None
+    for matter in session.lesson_plan.children:
+        for node in matter.children:
+            if node.id == body.node_id:
+                target_node = node
+                target_matter = matter
+                break
+        if target_node is not None:
+            break
+
+    if target_node is None or target_matter is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Node {body.node_id!r} not found in this session's lesson plan.",
+        )
+
+    # Don't downgrade a covered node; mirror _apply_section_updates' rank.
+    if target_node.status != "covered":
+        target_node.status = "skipped"
+
+    # Roll up the parent matter's status so the UI and advance gate see
+    # the new state without waiting for the next turn.
+    if all(c.status in ("covered", "skipped") for c in target_matter.children):
+        target_matter.status = "covered"
+    elif any(c.status != "pending" for c in target_matter.children):
+        target_matter.status = "partial"
+
+    await store.update(session)
+    logger.info(
+        "node_skipped",
+        node_id=body.node_id,
+        matter_status=target_matter.status,
+    )
     return _plan_to_response(session.lesson_plan)
 
 

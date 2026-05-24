@@ -207,7 +207,20 @@ async def submit_turn(
         has_remaining = any(
             c.status not in ("covered", "skipped") for c in current_matter.children
         )
-        if has_remaining:
+        if not has_remaining:
+            # Every leaf in this matter is already covered or skipped.
+            # Nothing for the evaluator to score, and the advance gate
+            # below needs matter_covered=True to move on — otherwise the
+            # session sticks on a fully-resolved matter forever. Also
+            # roll up the parent matter's own status so the case file UI
+            # reflects the all-done state.
+            _update_matter_status(current_matter)
+            matter_covered = _matter_all_covered(current_matter)
+            logger.info(
+                "evaluation_skipped_matter_done",
+                matter_covered=matter_covered,
+            )
+        else:
             eval_system = build_evaluation_system(
                 subject=session.subject,
                 topic=session.topic,
