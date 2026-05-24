@@ -55,7 +55,7 @@ export default function TestimonyInput({
     [setInput],
   );
 
-  const { listening, supported, toggle } = useSpeechRecognition({ onTranscript });
+  const { listening, supported, error: speechError, toggle } = useSpeechRecognition({ onTranscript });
 
   return (
     <>
@@ -123,9 +123,9 @@ export default function TestimonyInput({
               {supported && (
                 <button
                   onClick={toggle}
+                  title={speechError || (listening ? 'Stop dictation' : 'Start dictation')}
                   disabled={loading}
                   type="button"
-                  title={listening ? 'Stop dictation' : 'Start dictation'}
                   className={`absolute right-2 bottom-2 p-1.5 rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
                     listening
                       ? 'bg-crimson/10 text-crimson hover:bg-crimson/20 animate-pulse'
@@ -144,6 +144,11 @@ export default function TestimonyInput({
                 </button>
               )}
             </div>
+            {speechError && (
+              <p className="mt-1 font-sans text-[11px] text-crimson/80 leading-snug">
+                {speechError}
+              </p>
+            )}
           </div>
           <button
             onClick={onSubmit}
