@@ -32,11 +32,73 @@ curl -s localhost:8000/healthz | jq
 
 | Variable           | Required | Default                  | Notes |
 |---|---|---|---|
-| `LLM_PROVIDER`     | no       | `gemma`                  | Only `gemma` is implemented today. |
-| `GOOGLE_API_KEY` *or* `GEMINI_API_KEY` | yes (for gemma) | — | Google AI Studio key. |
+| `LLM_PROVIDER`     | no       | `gemma`                  | One of `gemma`, `file`, `mock`. See provider modes below. |
+| `GOOGLE_API_KEY` *or* `GEMINI_API_KEY` | yes (for `gemma`) | — | Google AI Studio key. Not needed for `file` or `mock`. |
 | `GEMMA_MODEL`      | no       | `gemma-4-26b-a4b-it`     | Any Gemma 4 model id. |
 | `PORT`             | no       | `8000`                   | |
-| `DATA_DIR`         | no       | `./data`                 | Session JSON + temp uploads. |
+| `DATA_DIR`         | no       | `./data`                 | Session JSON + temp uploads (and `llm_request_*.json` / `llm_response_*.json` in `file` mode). |
+
+---
+
+## Provider modes
+
+### `gemma` (default)
+
+Live API calls to Google AI Studio. Requires `GOOGLE_API_KEY` (or
+`GEMINI_API_KEY`).
+
+### `file` — manual / agent-driven exchange
+
+Instead of calling an LLM, the server writes each request to a JSON file
+under `DATA_DIR/` and polls for a matching response file. An external
+operator (a human, another agent like Claude or Devin, etc.) reads the
+request and writes the reply. No tokens get burned and you can hand-craft
+every turn — useful for user studies, scripted demos, and debugging the
+backend without spending API quota.
+
+Run it:
+
+```bash
+LLM_PROVIDER=file uv run fastapi dev src/oyez/main.py
+```
+
+The exchange:
+
+1. Backend writes `backend/data/llm_request_<id>.json` containing
+   `method`, `system`, `prompt` / `history`, optional `schema` /
+   `schema_name`, optional `files`, and a short `id`.
+2. Backend polls `backend/data/llm_response_<id>.json` every 1s (10
+   minute timeout).
+3. You write a response file with the same `<id>`.
+4. Backend reads it, validates, deletes both files, and continues the
+   turn.
+
+The response file accepts three shapes, in order of preference:
+
+1. **Wrapped:** `{"content": "<text or stringified JSON>", "id": "..."}`
+   — `id` is optional but if present must match the filename.
+2. **Raw structured object:** `{"message": "...", "scoring": {...}, ...}`
+   — the file body *is* the schema-conforming response. Convenient for
+   `structured_chat` calls so you don't have to JSON-encode a JSON string
+   inside a JSON wrapper.
+3. **Plain text:** anything that isn't JSON — the file body *is* the
+   textual reply. Convenient for `chat`/`text` calls where escaping
+   quotes and newlines in a wrapper is tedious.
+
+Tail the latest request while developing:
+
+```bash
+ls -t backend/data/llm_request_*.json | head -1 | xargs cat | jq
+```
+
+### `mock` — deterministic stub
+
+Returns canned strings / Pydantic instances without any I/O. Used by the
+test suite; rarely useful interactively.
+
+```bash
+LLM_PROVIDER=mock uv run fastapi dev src/oyez/main.py
+```
 
 ---
 
